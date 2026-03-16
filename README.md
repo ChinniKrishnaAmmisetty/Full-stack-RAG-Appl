@@ -1,3 +1,4 @@
+
 # Multi-RAG Chatbot System
 
 A production-grade Retrieval Augmented Generation (RAG) chatbot that lets users upload documents and ask questions powered by AI.
@@ -175,3 +176,6 @@ The chatbot follows a strict document-only answering rule:
 ## License
 
 MIT
+=======
+# Full-stack-RAG-Appl
+
