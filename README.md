@@ -178,4 +178,5 @@ The chatbot follows a strict document-only answering rule:
 MIT
 =======
 # Full-stack-RAG-Appl
+Updated deployement
 
