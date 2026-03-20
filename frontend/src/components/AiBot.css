@@ -157,3 +157,43 @@
   align-items: center;
   margin-bottom: 2rem;
 }
+
+/* Error State Styles */
+.bot-error .bot-head {
+  background: linear-gradient(135deg, #991b1b, #450a0a);
+  box-shadow: 0 10px 25px rgba(239,68,68,0.5), inset 0 0 15px rgba(239,68,68,0.2);
+}
+[data-theme='light'] .bot-error .bot-head {
+  background: linear-gradient(135deg, #fca5a5, #ef4444);
+  box-shadow: 0 10px 25px rgba(239,68,68,0.5), inset 0 0 15px rgba(255,255,255,0.8);
+}
+
+.bot-error .bot-antenna-ball {
+  background: #ef4444;
+  box-shadow: 0 0 15px #ef4444;
+  animation: pulse-glow-error 2s infinite;
+}
+
+@keyframes pulse-glow-error {
+  0%, 100% { box-shadow: 0 0 10px #ef4444; }
+  50% { box-shadow: 0 0 25px #f87171; background: #f87171; }
+}
+
+/* Backside viewing state */
+.bot-head {
+  transition: transform 0.5s cubic-bezier(0.4, 0, 0.2, 1), background 0.3s ease, box-shadow 0.3s ease;
+  transform-style: preserve-3d;
+}
+
+.bot-back .bot-head {
+  transform: rotateY(180deg);
+}
+
+.bot-face {
+  backface-visibility: hidden;
+  transition: opacity 0.3s;
+}
+
+.bot-back .bot-face {
+  opacity: 0;
+}

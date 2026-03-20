@@ -12,6 +12,7 @@ export default function RegisterPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [botExpression, setBotExpression] = useState('neutral');
@@ -83,11 +84,11 @@ export default function RegisterPage() {
 
   return (
     <div className="auth-page" id="register-page" style={{ position: 'relative', overflow: 'hidden' }}>
-      <MatrixBackground />
+      <MatrixBackground isError={!!error} />
       <div className="auth-card" ref={cardRef} onMouseMove={handleCardMove} onMouseLeave={handleCardLeave}>
         <div className="auth-header">
           <div className="bot-mascot-container" style={{ marginTop: '-40px', marginBottom: '10px' }}>
-            <AiBot size={75} expression={botExpression} />
+            <AiBot size={75} expression={isPasswordFocused ? 'back' : botExpression} isError={!!error} />
           </div>
           <h1>Join <span className="brand-gradient">ACK AI</span></h1>
           <p>Create an account to start chatting with your documents</p>
@@ -127,6 +128,8 @@ export default function RegisterPage() {
               placeholder="Password (min 6 characters)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onFocus={() => setIsPasswordFocused(true)}
+              onBlur={() => setIsPasswordFocused(false)}
               required
               minLength={6}
               autoComplete="new-password"
@@ -140,6 +143,8 @@ export default function RegisterPage() {
               placeholder="Confirm password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
+              onFocus={() => setIsPasswordFocused(true)}
+              onBlur={() => setIsPasswordFocused(false)}
               required
               autoComplete="new-password"
             />

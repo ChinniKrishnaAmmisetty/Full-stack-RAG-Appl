@@ -3,9 +3,9 @@ import './AiBot.css';
 
 /**
  * AI Robot mascot that follows the cursor with its eyes.
- * Supports different expressions: 'neutral', 'happy', 'sad', 'laugh'.
+ * Supports different expressions: 'neutral', 'happy', 'sad', 'laugh', 'back'.
  */
-export default function AiBot({ size = 120, expression = 'neutral' }) {
+export default function AiBot({ size = 120, expression = 'neutral', isError = false }) {
   const [isHovered, setIsHovered] = useState(false);
   const botRef = useRef(null);
   const leftEyeRef = useRef(null);
@@ -47,7 +47,7 @@ export default function AiBot({ size = 120, expression = 'neutral' }) {
 
   return (
     <div 
-      className={`ai-bot bot-${currentExpression}`} 
+      className={`ai-bot bot-${currentExpression} ${isError ? 'bot-error' : ''}`} 
       ref={botRef} 
       style={{ width: s, height: s, cursor: 'pointer' }}
       onMouseEnter={() => setIsHovered(true)}

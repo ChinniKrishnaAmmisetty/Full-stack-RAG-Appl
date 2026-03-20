@@ -10,6 +10,7 @@ import { playWelcomeSound } from '../utils/welcomeSound';
 export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [botExpression, setBotExpression] = useState('neutral');
@@ -51,7 +52,7 @@ export default function LoginPage() {
     setBotExpression('neutral');
 
     if (password.length < 6) {
-      setError('Invalid email or password.');
+      setError('incorrect password or username');
       setBotExpression('sad');
       setLoading(false);
       return;
@@ -69,7 +70,7 @@ export default function LoginPage() {
       
       setTimeout(() => navigate('/chat'), 1500);
     } catch (err) {
-      setError(err.response?.data?.detail || 'Invalid email or password.');
+      setError(err.response?.data?.detail || 'incorrect password or username');
       setBotExpression('sad');
     } finally {
       setLoading(false);
@@ -78,11 +79,11 @@ export default function LoginPage() {
 
   return (
     <div className="auth-page" id="login-page" style={{ position: 'relative', overflow: 'hidden' }}>
-      <MatrixBackground />
+      <MatrixBackground isError={!!error} />
       <div className="auth-card" ref={cardRef} onMouseMove={handleCardMove} onMouseLeave={handleCardLeave}>
         <div className="auth-header">
           <div className="bot-mascot-container" style={{ marginTop: '-40px', marginBottom: '10px' }}>
-            <AiBot size={75} expression={botExpression} />
+            <AiBot size={75} expression={isPasswordFocused ? 'back' : botExpression} isError={!!error} />
           </div>
           <h1>Welcome back to <span className="brand-gradient">ACK AI</span></h1>
           <p>Sign in to access your AI-powered document assistant</p>
@@ -110,6 +111,8 @@ export default function LoginPage() {
               placeholder="Password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              onFocus={() => setIsPasswordFocused(true)}
+              onBlur={() => setIsPasswordFocused(false)}
               required
               autoComplete="current-password"
             />
@@ -120,7 +123,7 @@ export default function LoginPage() {
         </form>
 
         <p className="auth-footer">
-          Don't have an account? <Link to="/register">Create one</Link>
+          Don&apos;t have an account? <Link to="/register">Create one</Link>
         </p>
       </div>
     </div>

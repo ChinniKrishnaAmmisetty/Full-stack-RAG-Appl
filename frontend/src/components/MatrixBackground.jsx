@@ -1,7 +1,12 @@
 import { useEffect, useRef } from 'react';
 
-export default function MatrixBackground() {
+export default function MatrixBackground({ isError = false }) {
   const canvasRef = useRef(null);
+  const isErrorRef = useRef(isError);
+
+  useEffect(() => {
+    isErrorRef.current = isError;
+  }, [isError]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -40,7 +45,7 @@ export default function MatrixBackground() {
       ctx.fillStyle = 'rgba(0, 0, 0, 0.05)';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = '#0F0'; // Green text
+      ctx.fillStyle = isErrorRef.current ? '#ef4444' : '#0F0'; // Red text on error, else Green text
       ctx.font = fontSize + 'px monospace';
 
       for (let i = 0; i < drops.length; i++) {
