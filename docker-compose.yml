@@ -3,10 +3,11 @@ services:
   etcd:
     image: quay.io/coreos/etcd:v3.5.16
     container_name: rag-etcd
+    restart: unless-stopped
     environment:
       - ETCD_AUTO_COMPACTION_MODE=revision
       - ETCD_AUTO_COMPACTION_RETENTION=1000
-      - ETCD_QUOTA_BACKEND_BYTES=4294967296
+      - ETCD_QUOTA_BACKEND_BYTES=2147483648 # Reduced to 2GB for lower memory usage
       - ETCD_SNAPSHOT_COUNT=50000
     volumes:
       - etcd_data:/etcd
@@ -18,15 +19,19 @@ services:
       retries: 3
     networks:
       - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   minio:
     image: minio/minio:RELEASE.2024-09-22T00-33-43Z
     container_name: rag-minio
+    restart: unless-stopped
     environment:
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-    ports:
-      - "9001:9001"  # MinIO Console
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?MINIO_ACCESS_KEY is required in .env}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?MINIO_SECRET_KEY is required in .env}
+    # Removed exposed port to host for security. Only accessible inside Docker network.
     volumes:
       - minio_data:/minio_data
     command: minio server /minio_data --console-address ":9001"
@@ -37,11 +42,16 @@ services:
       retries: 3
     networks:
       - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # ── Milvus Vector Database ──
   milvus:
     image: milvusdb/milvus:v2.4.13
     container_name: rag-milvus
+    restart: unless-stopped
     command: ["milvus", "run", "standalone"]
     security_opt:
       - seccomp:unconfined
@@ -50,9 +60,7 @@ services:
       MINIO_ADDRESS: minio:9000
     volumes:
       - milvus_data:/var/lib/milvus
-    ports:
-      - "19530:19530"  # Milvus gRPC
-      - "9091:9091"    # Milvus health
+    # Removed exposed ports for internal security. Only FastAPI touches Milvus.
     depends_on:
       etcd:
         condition: service_healthy
@@ -66,17 +74,21 @@ services:
       retries: 3
     networks:
       - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 1024M # Limited to 1GB to prevent RAM exhaustion
 
   # ── PostgreSQL Database ──
   postgres:
     image: postgres:16-alpine
     container_name: rag-postgres
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: rag_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: root
-    ports:
-      - "5432:5432"
+      POSTGRES_DB: ${POSTGRES_DB:-rag_db}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
+    # Removed external port exposure to protect database
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -86,6 +98,10 @@ services:
       retries: 5
     networks:
       - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # ── FastAPI Backend ──
   backend:
@@ -93,18 +109,19 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     container_name: rag-backend
+    restart: unless-stopped
     ports:
-      - "8000:8000"
+      - "8000:8000" # Explicitly exposed for frontend API requests
     environment:
       DB_HOST: postgres
       DB_PORT: 5432
-      DB_NAME: rag_db
-      DB_USER: postgres
-      DB_PASSWORD: root
+      DB_NAME: ${POSTGRES_DB:-rag_db}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required in .env}
       MILVUS_HOST: milvus
       MILVUS_PORT: 19530
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-your-gemini-api-key}
-      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.1-pro-preview}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY is required in .env}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-pro}
     volumes:
       - backend_uploads:/app/uploads
     depends_on:
@@ -114,6 +131,10 @@ services:
         condition: service_healthy
     networks:
       - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
 
   # ── React Frontend ──
   frontend:
@@ -121,12 +142,17 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     container_name: rag-frontend
+    restart: unless-stopped
     ports:
-      - "5173:80"
+      - "5173:80" # Exposed on standard HTTP mapped to Vite/Nginx internal port 80
     depends_on:
       - backend
     networks:
       - rag-network
+    deploy:
+      resources:
+        limits:
+          memory: 256M
 
 volumes:
   etcd_data:
