@@ -67,5 +67,32 @@ app.include_router(chat_router.router, prefix="/api")
 
 @app.get("/api/health")
 async def health_check():
-    """Health check endpoint."""
-    return {"status": "healthy", "service": "Multi-RAG Chatbot API"}
+    """Health check endpoint — verifies database and vector DB connectivity."""
+    health = {"status": "healthy", "service": "Multi-RAG Chatbot API", "checks": {}}
+
+    # Check PostgreSQL
+    try:
+        from app.database import AsyncSessionLocal
+        from sqlalchemy import text
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+        health["checks"]["postgresql"] = "connected"
+    except Exception as e:
+        health["checks"]["postgresql"] = f"error: {str(e)[:100]}"
+        health["status"] = "unhealthy"
+
+    # Check Milvus
+    try:
+        from pymilvus import connections
+        connections.connect(alias="health_check", host=settings.MILVUS_HOST, port=settings.MILVUS_PORT)
+        connections.disconnect("health_check")
+        health["checks"]["milvus"] = "connected"
+    except Exception as e:
+        health["checks"]["milvus"] = f"error: {str(e)[:100]}"
+        health["status"] = "unhealthy"
+
+    if health["status"] == "unhealthy":
+        from fastapi.responses import JSONResponse
+        return JSONResponse(content=health, status_code=503)
+
+    return health

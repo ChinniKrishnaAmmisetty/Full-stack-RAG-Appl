@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { registerUser, getMe } from '../api';
 import { useAuth } from '../context/AuthContext';
-import { FiMail, FiLock, FiUser, FiUserPlus } from 'react-icons/fi';
+import { FiMail, FiLock, FiUser, FiUserPlus, FiEye, FiEyeOff } from 'react-icons/fi';
 import AiBot from '../components/AiBot';
 import MatrixBackground from '../components/MatrixBackground';
 import { playWelcomeSound } from '../utils/welcomeSound';
@@ -12,6 +12,8 @@ export default function RegisterPage() {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -124,7 +126,7 @@ export default function RegisterPage() {
             <FiLock className="input-icon" />
             <input
               id="register-password"
-              type="password"
+              type={showPassword ? "text" : "password"}
               placeholder="Password (min 6 characters)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
@@ -133,13 +135,23 @@ export default function RegisterPage() {
               required
               minLength={6}
               autoComplete="new-password"
+              style={{ paddingRight: '40px' }}
             />
+            <button
+              type="button"
+              className="password-toggle-icon"
+              onClick={() => setShowPassword(!showPassword)}
+              tabIndex="-1"
+              title={showPassword ? "Hide password" : "Show password"}
+            >
+              {showPassword ? <FiEyeOff /> : <FiEye />}
+            </button>
           </div>
           <div className="input-group">
             <FiLock className="input-icon" />
             <input
               id="register-confirm-password"
-              type="password"
+              type={showConfirmPassword ? "text" : "password"}
               placeholder="Confirm password"
               value={confirmPassword}
               onChange={(e) => setConfirmPassword(e.target.value)}
@@ -147,7 +159,17 @@ export default function RegisterPage() {
               onBlur={() => setIsPasswordFocused(false)}
               required
               autoComplete="new-password"
+              style={{ paddingRight: '40px' }}
             />
+            <button
+              type="button"
+              className="password-toggle-icon"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              tabIndex="-1"
+              title={showConfirmPassword ? "Hide password" : "Show password"}
+            >
+              {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
+            </button>
           </div>
           <button id="register-submit" type="submit" className="btn-primary" disabled={loading}>
             {loading ? <span className="btn-spinner"></span> : <><FiUserPlus /> Create Account</>}

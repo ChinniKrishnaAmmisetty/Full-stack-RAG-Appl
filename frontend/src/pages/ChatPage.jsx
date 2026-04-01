@@ -168,7 +168,7 @@ export default function ChatPage() {
 
   const handleFileUpload = async (file) => {
     if (!file) return;
-    const allowed = ['pdf', 'docx', 'txt'];
+    const allowed = ['pdf', 'docx', 'txt', 'csv', 'xlsx', 'md'];
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!allowed.includes(ext)) { setUploadStatus({ type: 'error', msg: `Only ${allowed.join(', ')} allowed` }); return; }
     if (file.size > 50 * 1024 * 1024) { setUploadStatus({ type: 'error', msg: 'File too large (max 50 MB)' }); return; }
@@ -316,7 +316,7 @@ export default function ChatPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.txt"
+            accept=".pdf,.docx,.txt,.csv,.xlsx,.md"
             onChange={(e) => { handleFileUpload(e.target.files[0]); e.target.value = ''; }}
             hidden
             id="file-input"

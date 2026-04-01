@@ -36,6 +36,9 @@ SYSTEM_PROMPT = """You are **ACK AI**, a professional document-analysis assistan
 - Respond like a senior analyst presenting findings — structured, confident, and data-driven.
 - Avoid filler words, unnecessary disclaimers, or overly verbose explanations."""
 
+# Model used for lightweight tasks like query expansion (cheaper and faster)
+QUERY_EXPANSION_MODEL = "gemini-2.0-flash"
+
 
 def build_rag_prompt(question: str, context_chunks: list[dict], chat_history: list[dict] | None = None) -> str:
     """Build the full prompt with retrieved context, chat history, and user question."""
@@ -78,9 +81,19 @@ Provide a well-structured, accurate answer based on the document context above."
 
 
 async def expand_query(question: str) -> str:
-    """Use Gemini to expand a short/ambiguous user question into a better search query."""
+    """Use a lightweight Gemini model to expand a short/ambiguous user question into a better search query.
+
+    Skips expansion for queries that are already well-formed (> 10 words).
+    Uses a flash model to minimize latency and cost.
+    """
+    # Skip expansion for well-formed queries
+    word_count = len(question.strip().split())
+    if word_count > 10:
+        logger.info(f"Query expansion skipped — query already has {word_count} words")
+        return question
+
     try:
-        model = genai.GenerativeModel(model_name=settings.GEMINI_MODEL)
+        model = genai.GenerativeModel(model_name=QUERY_EXPANSION_MODEL)
         prompt = f"""You are a search query optimizer for a vector database.
 Rewrite the user's question into a highly descriptive, keyword-rich search query.
 Resolve ambiguity, expand acronyms, and add relevant synonyms.
@@ -100,7 +113,12 @@ Optimized Query:"""
 
 
 def merge_and_rerank(vector_results: list[dict], keyword_results: list[dict], query: str) -> list[dict]:
-    """Merge vector and keyword results, deduplicate, and re-rank based on keyword match density."""
+    """Merge vector and keyword results, deduplicate, and re-rank using normalized weighted scoring.
+
+    Uses a weighted combination:
+    - 70% vector similarity (cosine distance already in 0-1 range)
+    - 30% keyword density (normalized count of query words found in chunk)
+    """
     unique_chunks = {}
     for res in vector_results + keyword_results:
         chunk_id = res.get("id")
@@ -110,14 +128,21 @@ def merge_and_rerank(vector_results: list[dict], keyword_results: list[dict], qu
     chunks = list(unique_chunks.values())
     query_words = set([w.strip("?,.!;'\"").lower() for w in query.split() if len(w) > 2])
 
+    if not query_words:
+        return chunks[:5]
+
     for chunk in chunks:
         text_lower = chunk["text"].lower()
-        score = 0
-        for qw in query_words:
-            if qw in text_lower:
-                score += 1
-        similarity = chunk.get("distance", 0.0)
-        chunk["rerank_score"] = score + similarity
+
+        # Keyword density: fraction of query words found in the chunk (0.0 to 1.0)
+        matched_words = sum(1 for qw in query_words if qw in text_lower)
+        keyword_score = matched_words / len(query_words)
+
+        # Vector similarity: cosine similarity is already 0-1 for normalized vectors
+        vector_score = chunk.get("distance", 0.0)
+
+        # Weighted combination
+        chunk["rerank_score"] = (0.7 * vector_score) + (0.3 * keyword_score)
 
     chunks.sort(key=lambda x: x["rerank_score"], reverse=True)
     return chunks[:5]

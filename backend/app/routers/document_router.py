@@ -10,7 +10,7 @@ from app.models import User, Document
 from app.schemas import DocumentResponse
 from app.auth import get_current_user
 from app.config import get_settings
-from app.services.document_service import extract_text_from_file, split_text_into_chunks
+from app.services.document_service import extract_text_from_file, split_text_into_chunks, validate_file_content
 from app.services.embedding_service import generate_embeddings
 from app.services.vector_service import add_document_chunks, delete_document_chunks
 
@@ -19,7 +19,7 @@ settings = get_settings()
 
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
-ALLOWED_EXTENSIONS = {"pdf", "docx", "txt"}
+ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "csv", "xlsx", "md"}
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
 
 
@@ -44,6 +44,10 @@ async def _process_document(
     SessionLocal = async_sessionmaker(bind=engine, class_=AS, expire_on_commit=False)
 
     try:
+        # 0. Validate file content matches claimed type
+        if not validate_file_content(file_path, file_type):
+            raise ValueError(f"File content does not match the claimed type '{file_type}'. File may be corrupted or misnamed.")
+
         # 1. Extract text
         logger.info(f"Extracting text from {file_path}")
         text = extract_text_from_file(file_path, file_type)
@@ -92,6 +96,7 @@ async def _process_document(
             doc = result.scalar_one_or_none()
             if doc:
                 doc.status = "failed"
+                doc.error_message = str(e)[:500]  # Truncate to avoid huge error texts
                 await session.commit()
     finally:
         await engine.dispose()
@@ -193,7 +198,7 @@ async def delete_document(
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Delete vectors from ChromaDB
+    # Delete vectors from Milvus
     delete_document_chunks(current_user.id, document_id)
 
     # Delete from database

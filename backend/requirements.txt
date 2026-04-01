@@ -16,3 +16,5 @@ httpx==0.27.2
 slowapi==0.1.9
 aiofiles
 python-dotenv==1.0.1
+tenacity==9.0.0
+openpyxl==3.1.5

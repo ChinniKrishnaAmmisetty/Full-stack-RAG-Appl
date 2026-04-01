@@ -11,7 +11,7 @@ export default function FileUpload({ onUploadComplete }) {
   const handleFile = async (file) => {
     if (!file) return;
 
-    const allowed = ['pdf', 'docx', 'txt'];
+    const allowed = ['pdf', 'docx', 'txt', 'csv', 'xlsx', 'md'];
     const ext = file.name.split('.').pop()?.toLowerCase();
     if (!allowed.includes(ext)) {
       setStatus({ type: 'error', message: `Unsupported file type. Allowed: ${allowed.join(', ')}` });
@@ -57,11 +57,11 @@ export default function FileUpload({ onUploadComplete }) {
       >
         <FiUploadCloud className="upload-icon" />
         <p>{uploading ? 'Uploading...' : 'Drop a file or click to upload'}</p>
-        <span className="upload-hint">PDF, DOCX, TXT — up to 50 MB</span>
+        <span className="upload-hint">PDF, DOCX, TXT, CSV, XLSX, MD — up to 50 MB</span>
         <input
           ref={fileInputRef}
           type="file"
-          accept=".pdf,.docx,.txt"
+          accept=".pdf,.docx,.txt,.csv,.xlsx,.md"
           onChange={(e) => handleFile(e.target.files[0])}
           hidden
           id="file-input"

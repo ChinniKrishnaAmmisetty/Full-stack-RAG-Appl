@@ -1,22 +1,23 @@
 import { useState, useRef, useEffect } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { loginUser, getMe } from '../api';
-import { useAuth } from '../context/AuthContext';
-import { FiUser, FiLock, FiLogIn, FiEye, FiEyeOff } from 'react-icons/fi';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { resetPassword } from '../api';
+import { FiLock, FiCheck, FiArrowLeft, FiEye, FiEyeOff } from 'react-icons/fi';
 import AiBot from '../components/AiBot';
 import MatrixBackground from '../components/MatrixBackground';
-import { playWelcomeSound } from '../utils/welcomeSound';
 
-export default function LoginPage() {
-  const [username, setUsername] = useState('');
+export default function ResetPasswordPage() {
+  const { token } = useParams();
+  const navigate = useNavigate();
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [isPasswordFocused, setIsPasswordFocused] = useState(false);
+  
+  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [botExpression, setBotExpression] = useState('neutral');
-  const { login } = useAuth();
-  const navigate = useNavigate();
   const cardRef = useRef(null);
 
   useEffect(() => {
@@ -46,32 +47,35 @@ export default function LoginPage() {
     }
   };
 
-  const handleLogin = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    setLoading(true);
-    setBotExpression('neutral');
-
-    if (password.length < 6) {
-      setError('incorrect password or username');
+    setMessage('');
+    
+    if (password !== confirmPassword) {
+      setError('Passwords do not match');
       setBotExpression('sad');
-      setLoading(false);
+      return;
+    }
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters');
+      setBotExpression('sad');
       return;
     }
 
+    setLoading(true);
+    setBotExpression('neutral');
+
     try {
-      const res = await loginUser({ username, password });
-      const token = res.data.access_token;
-      localStorage.setItem('token', token);
-      const userRes = await getMe();
-      login(token, userRes.data);
-      
+      const res = await resetPassword({ token, new_password: password });
+      setMessage(res.data.message);
       setBotExpression('happy');
-      playWelcomeSound();
       
-      setTimeout(() => navigate('/chat'), 1500);
+      setTimeout(() => {
+        navigate('/login');
+      }, 3000);
     } catch (err) {
-      setError(err.response?.data?.detail || 'incorrect password or username');
+      setError(err.response?.data?.detail || 'Invalid or expired token. Please try again.');
       setBotExpression('sad');
     } finally {
       setLoading(false);
@@ -79,43 +83,36 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="auth-page" id="login-page" style={{ position: 'relative', overflow: 'hidden' }}>
+    <div className="auth-page" style={{ position: 'relative', overflow: 'hidden' }}>
       <MatrixBackground isError={!!error} />
       <div className="auth-card" ref={cardRef} onMouseMove={handleCardMove} onMouseLeave={handleCardLeave}>
         <div className="auth-header">
           <div className="bot-mascot-container" style={{ marginTop: '-40px', marginBottom: '10px' }}>
             <AiBot size={75} expression={isPasswordFocused ? 'back' : botExpression} isError={!!error} />
           </div>
-          <h1>Welcome back to <span className="brand-gradient">ACK AI</span></h1>
-          <p>Sign in to access your AI-powered document assistant</p>
+          <h1>Create New Password</h1>
+          <p>Please enter your new password</p>
         </div>
-        {error && <div className="auth-error">{error}</div>}
         
-        <form onSubmit={handleLogin} className="auth-form">
-          <div className="input-group">
-            <FiUser className="input-icon" />
-            <input
-              id="login-username"
-              type="text"
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              autoComplete="username"
-            />
+        {error && <div className="auth-error">{error}</div>}
+        {message && (
+          <div className="auth-error" style={{ background: 'rgba(52, 211, 153, 0.1)', color: 'var(--success)', borderColor: 'rgba(52, 211, 153, 0.2)' }}>
+            {message} Redirecting to login...
           </div>
+        )}
+
+        <form onSubmit={handleSubmit} className="auth-form">
           <div className="input-group">
             <FiLock className="input-icon" />
             <input
-              id="login-password"
               type={showPassword ? "text" : "password"}
-              placeholder="Password"
+              placeholder="New Password (min 6 chars)"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               onFocus={() => setIsPasswordFocused(true)}
               onBlur={() => setIsPasswordFocused(false)}
               required
-              autoComplete="current-password"
+              minLength={6}
               style={{ paddingRight: '40px' }}
             />
             <button
@@ -123,25 +120,39 @@ export default function LoginPage() {
               className="password-toggle-icon"
               onClick={() => setShowPassword(!showPassword)}
               tabIndex="-1"
-              title={showPassword ? "Hide password" : "Show password"}
             >
               {showPassword ? <FiEyeOff /> : <FiEye />}
             </button>
           </div>
-          
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '-6px', marginBottom: '8px' }}>
-            <Link to="/forgot-password" style={{ fontSize: '13px', color: 'var(--accent)', textDecoration: 'none' }}>
-              Forgot password?
-            </Link>
+          <div className="input-group">
+            <FiLock className="input-icon" />
+            <input
+              type={showConfirmPassword ? "text" : "password"}
+              placeholder="Confirm New Password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              onFocus={() => setIsPasswordFocused(true)}
+              onBlur={() => setIsPasswordFocused(false)}
+              required
+              style={{ paddingRight: '40px' }}
+            />
+            <button
+              type="button"
+              className="password-toggle-icon"
+              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+              tabIndex="-1"
+            >
+              {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
+            </button>
           </div>
-
-          <button id="login-submit" type="submit" className="btn-primary" disabled={loading}>
-            {loading ? <span className="btn-spinner"></span> : <>Sign In <FiLogIn style={{marginLeft: '8px'}} /></>}
+          
+          <button type="submit" className="btn-primary" disabled={loading || message}>
+            {loading ? <span className="btn-spinner"></span> : <>Reset Password <FiCheck style={{marginLeft: '8px'}} /></>}
           </button>
         </form>
 
-        <p className="auth-footer">
-          Don&apos;t have an account? <Link to="/register">Create one</Link>
+        <p className="auth-footer" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+          <FiArrowLeft /> <Link to="/login">Back to Sign in</Link>
         </p>
       </div>
     </div>

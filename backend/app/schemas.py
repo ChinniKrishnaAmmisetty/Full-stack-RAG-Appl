@@ -14,8 +14,17 @@ class UserRegister(BaseModel):
 
 
 class UserLogin(BaseModel):
-    email: EmailStr
+    username: str
     password: str
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(min_length=6, max_length=128)
 
 
 class UserGoogleLogin(BaseModel):
@@ -45,6 +54,7 @@ class DocumentResponse(BaseModel):
     file_size: int
     chunk_count: int
     status: str
+    error_message: str | None = None
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -134,6 +134,16 @@ def query_similar_chunks(
     return output
 
 
+def _sanitize_milvus_input(value: str) -> str:
+    """Sanitize input for use in Milvus expressions to prevent injection attacks."""
+    # Remove characters that could break Milvus expressions
+    dangerous_chars = ['"', "'", "\\", ";", "(", ")", "==", "||", "&&"]
+    sanitized = value
+    for char in dangerous_chars:
+        sanitized = sanitized.replace(char, "")
+    return sanitized.strip()
+
+
 def query_keyword_chunks(
     user_id: str,
     query: str,
@@ -152,15 +162,19 @@ def query_keyword_chunks(
     # Extremely basic stopword removal to find important keywords
     stop_words = {"what", "is", "the", "in", "a", "an", "of", "and", "to", "for", "with", "on", "at", "by", "from", "about", "as", "into", "like", "through", "after", "over", "between", "out", "against", "during", "without", "before", "under", "around", "among"}
     words = [w.strip("?,.!;'\"").lower() for w in query.split()]
-    keywords = [w for w in words if w and w not in stop_words and len(w) > 2]
-    
+    keywords = [_sanitize_milvus_input(w) for w in words if w and w not in stop_words and len(w) > 2]
+    keywords = [kw for kw in keywords if kw]  # Remove empty strings after sanitization
+
     if not keywords:
         return []
 
-    # Build LIKE expression: user_id == 'id' and (text like '%word1%' or text like '%word2%')
+    # Sanitize user_id for expression safety
+    safe_user_id = _sanitize_milvus_input(user_id)
+
+    # Build LIKE expression with sanitized inputs
     like_clauses = [f'text like "%{kw}%"' for kw in keywords]
     joined_likes = " or ".join(like_clauses)
-    expr = f"user_id == '{user_id}' and ({joined_likes})"
+    expr = f"user_id == '{safe_user_id}' and ({joined_likes})"
 
     try:
         results = collection.query(

@@ -52,7 +52,7 @@ export default function SettingsModal({ isOpen, onClose }) {
           <h3 className="section-title">About</h3>
           <div className="about-info">
             <div className="about-row"><FiShield /> <span>RAG Document Assistant v1.0</span></div>
-            <p className="about-desc">Powered by Gemini API with FAISS vector search</p>
+            <p className="about-desc">Powered by Gemini API with Milvus vector search</p>
           </div>
         </div>
       </div>

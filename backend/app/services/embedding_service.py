@@ -1,7 +1,9 @@
 """Embedding generation service using Gemini's text-embedding API."""
 
 import logging
+import asyncio
 import google.generativeai as genai
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from app.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -13,6 +15,14 @@ def _ensure_configured():
     genai.configure(api_key=settings.GEMINI_API_KEY)
 
 
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Embedding API call failed, retrying (attempt {retry_state.attempt_number}/3)..."
+    ),
+)
 def generate_embeddings(texts: list[str]) -> list[list[float]]:
     """Generate embeddings for a list of text strings using Gemini.
 
@@ -41,6 +51,19 @@ def generate_embeddings(texts: list[str]) -> list[list[float]]:
     return embeddings
 
 
+async def generate_embeddings_async(texts: list[str]) -> list[list[float]]:
+    """Async wrapper — runs embedding generation in a thread pool to avoid blocking the event loop."""
+    return await asyncio.to_thread(generate_embeddings, texts)
+
+
+@retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=1, min=1, max=10),
+    retry=retry_if_exception_type(Exception),
+    before_sleep=lambda retry_state: logger.warning(
+        f"Query embedding API call failed, retrying (attempt {retry_state.attempt_number}/3)..."
+    ),
+)
 def generate_query_embedding(query: str) -> list[float]:
     """Generate an embedding for a single search query.
 
@@ -57,3 +80,9 @@ def generate_query_embedding(query: str) -> list[float]:
         task_type="retrieval_query",
     )
     return result["embedding"]
+
+
+async def generate_query_embedding_async(query: str) -> list[float]:
+    """Async wrapper for query embedding generation."""
+    return await asyncio.to_thread(generate_query_embedding, query)
+

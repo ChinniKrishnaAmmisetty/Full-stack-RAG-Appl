@@ -165,6 +165,9 @@ a { color: var(--text-link); text-decoration: none; }
 .input-group input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
 .input-group:focus-within .input-icon { color: var(--accent); }
 
+.password-toggle-icon { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 15px; cursor: pointer; transition: var(--transition); background: transparent; border: none; padding: 4px; display: flex; align-items: center; justify-content: center; }
+.password-toggle-icon:hover { color: var(--text-primary); }
+
 .btn-primary { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; padding: 12px; background: var(--gradient-primary); border: none; border-radius: var(--radius-sm); color: #fff; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; transition: var(--transition); margin-top: 4px; box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3); }
 .btn-primary:hover:not(:disabled) { transform: translateY(-2px); box-shadow: 0 8px 20px rgba(99, 102, 241, 0.4); }
 .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
