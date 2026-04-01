@@ -16,7 +16,7 @@ Frontend (React + Vite)  →  Backend (FastAPI)  →  PostgreSQL (users, docs, c
 
 ## Features
 
-- **Authentication**: JWT-based login/register with bcrypt password hashing
+- **Authentication**: JWT-based login/register (username-based login) with bcrypt password hashing and password recovery flow
 - **Document Upload**: PDF, DOCX, TXT — text extraction, chunking, embedding
 - **Isolated Knowledge Bases**: Each user has their own vector namespace
 - **RAG Pipeline**: gemini-embedding-001 embeddings + Milvus vector search + Gemini API
@@ -85,8 +85,10 @@ Navigate to **http://localhost:5173** in your browser.
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/auth/register` | Register a new user |
-| `POST` | `/api/auth/login` | Login and get JWT token |
+| `POST` | `/api/auth/login` | Login (via username) and get JWT token |
 | `GET` | `/api/auth/me` | Get current user info |
+| `POST` | `/api/auth/forgot-password` | Generate password reset token |
+| `POST` | `/api/auth/reset-password` | Reset password using token |
 | `POST` | `/api/documents/upload` | Upload a document (multipart) |
 | `GET` | `/api/documents/` | List user's documents |
 | `DELETE` | `/api/documents/{id}` | Delete a document |
@@ -131,6 +133,8 @@ RAG_chatbot/
 │   │   ├── pages/
 │   │   │   ├── LoginPage.jsx
 │   │   │   ├── RegisterPage.jsx
+│   │   │   ├── ForgotPasswordPage.jsx
+│   │   │   ├── ResetPasswordPage.jsx
 │   │   │   └── ChatPage.jsx
 │   │   ├── components/
 │   │   │   ├── Sidebar.jsx
