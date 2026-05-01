@@ -1,0 +1,32 @@
+[
+  {
+    "id": "q001",
+    "query": "What is the total revenue?",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "The total revenue is discussed in the financial section of the document."
+  },
+  {
+    "id": "q002",
+    "query": "Explain EBITDA margin",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "EBITDA margin is a financial metric that measures a company's operating profitability."
+  },
+  {
+    "id": "q003",
+    "query": "What are the key risks mentioned?",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "The key risks include market volatility, regulatory changes, and operational challenges."
+  },
+  {
+    "id": "q004",
+    "query": "Summarize the introduction",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "The introduction provides an overview of the company's mission and strategic goals."
+  },
+  {
+    "id": "q005",
+    "query": "What is the company's growth strategy?",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "The growth strategy focuses on market expansion, product innovation, and strategic partnerships."
+  }
+]

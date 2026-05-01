@@ -1,11 +1,10 @@
-"""Pydantic schemas for request/response validation."""
+"""Pydantic schemas for request and response validation."""
 
-from pydantic import BaseModel, EmailStr, Field
 from datetime import datetime
 from typing import Optional
 
+from pydantic import BaseModel, EmailStr, Field
 
-# ── Auth Schemas ──────────────────────────────────────────────
 
 class UserRegister(BaseModel):
     email: EmailStr
@@ -27,10 +26,6 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=128)
 
 
-class UserGoogleLogin(BaseModel):
-    google_token: str
-
-
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
@@ -45,8 +40,6 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-# ── Document Schemas ──────────────────────────────────────────
-
 class DocumentResponse(BaseModel):
     id: str
     filename: str
@@ -59,8 +52,6 @@ class DocumentResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
-
-# ── Chat Schemas ──────────────────────────────────────────────
 
 class ChatSessionCreate(BaseModel):
     title: Optional[str] = "New Chat"
@@ -76,6 +67,14 @@ class ChatSessionResponse(BaseModel):
 
 class ChatMessageCreate(BaseModel):
     content: str = Field(min_length=1, max_length=5000)
+    mode: Optional[str] = None
+
+
+class RLQueryRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=5000)
+    expected_doc_ids: list[str] = Field(min_length=1)
+    expected_answer: str = Field(min_length=1)
+    evaluation: bool = False
 
 
 class ChatMessageResponse(BaseModel):
@@ -90,3 +89,19 @@ class ChatMessageResponse(BaseModel):
 class ChatResponse(BaseModel):
     user_message: ChatMessageResponse
     assistant_message: ChatMessageResponse
+
+
+class RLQueryResponse(BaseModel):
+    state: tuple[int, int, int]
+    action_id: int
+    top_k: int
+    reranker: bool
+    answer: str
+    reward: float
+    retrieval_hit: float
+    answer_quality: float
+    semantic_similarity: float
+    latency_penalty: float
+    response_latency_seconds: float
+    retrieved_doc_ids: list[str]
+    sources: list[dict]

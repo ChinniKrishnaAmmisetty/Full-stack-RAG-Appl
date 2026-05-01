@@ -1,17 +1,24 @@
 """Document upload, listing, and deletion endpoints."""
 
-import os
 import logging
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, BackgroundTasks, status
-from sqlalchemy.ext.asyncio import AsyncSession
+import os
+
+from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
-from app.database import get_db
-from app.models import User, Document
-from app.schemas import DocumentResponse
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.auth import get_current_user
 from app.config import get_settings
-from app.services.document_service import extract_text_from_file, split_text_into_chunks, validate_file_content
-from app.services.embedding_service import generate_embeddings
+from app.database import get_db
+from app.models import Document, User
+from app.schemas import DocumentResponse
+from app.services.document_service import (
+    extract_text_from_file,
+    split_text_into_chunks,
+    validate_file_content,
+)
+from app.services.embedding_service import generate_embeddings_async
+from app.services.ollama_service import OllamaServiceError
 from app.services.vector_service import add_document_chunks, delete_document_chunks
 
 logger = logging.getLogger(__name__)
@@ -20,13 +27,12 @@ settings = get_settings()
 router = APIRouter(prefix="/documents", tags=["Documents"])
 
 ALLOWED_EXTENSIONS = {"pdf", "docx", "txt", "csv", "xlsx", "md"}
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 MB
+MAX_FILE_SIZE = 50 * 1024 * 1024
 
 
 def _get_file_extension(filename: str) -> str:
     """Extract and validate the file extension."""
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    return ext
+    return filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
 
 
 async def _process_document(
@@ -34,52 +40,61 @@ async def _process_document(
     user_id: str,
     file_path: str,
     file_type: str,
-    db_url: str,
 ):
     """Background task to extract, chunk, embed, and store document vectors."""
-    from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession as AS
+    from app.database import AsyncSessionLocal
     from app.models import Document
 
-    engine = create_async_engine(db_url)
-    SessionLocal = async_sessionmaker(bind=engine, class_=AS, expire_on_commit=False)
+    async def mark_document_failed(message: str):
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(Document).where(Document.id == document_id))
+            doc = result.scalar_one_or_none()
+            if doc:
+                doc.status = "failed"
+                doc.error_message = message[:500]
+                await session.commit()
 
     try:
-        # 0. Validate file content matches claimed type
+        logger.info(
+            "Starting document processing | document_id=%s | user_id=%s | file_type=%s | path=%s",
+            document_id,
+            user_id,
+            file_type,
+            file_path,
+        )
         if not validate_file_content(file_path, file_type):
-            raise ValueError(f"File content does not match the claimed type '{file_type}'. File may be corrupted or misnamed.")
+            raise ValueError(
+                f"File content does not match the claimed type '{file_type}'. "
+                "File may be corrupted or misnamed."
+            )
 
-        # 1. Extract text
-        logger.info(f"Extracting text from {file_path}")
+        logger.info("Extracting text from %s", file_path)
         text = extract_text_from_file(file_path, file_type)
 
         if not text.strip():
             raise ValueError("No text content could be extracted from the file")
 
-        # 2. Split into chunks
         chunks = split_text_into_chunks(
             text,
             chunk_size=settings.CHUNK_SIZE,
             chunk_overlap=settings.CHUNK_OVERLAP,
         )
-        logger.info(f"Split into {len(chunks)} chunks")
+        logger.info("Split into %s chunks", len(chunks))
 
         if not chunks:
             raise ValueError("No chunks produced from the extracted text")
 
-        # 3. Generate embeddings
-        embeddings = generate_embeddings(chunks)
-        logger.info(f"Generated {len(embeddings)} embeddings")
+        embeddings = await generate_embeddings_async(chunks)
+        logger.info("Generated %s embeddings", len(embeddings))
 
-        # 4. Store in vector database
-        add_document_chunks(
+        await add_document_chunks(
             user_id=user_id,
             document_id=document_id,
             chunks=chunks,
             embeddings=embeddings,
         )
 
-        # 5. Update document status
-        async with SessionLocal() as session:
+        async with AsyncSessionLocal() as session:
             result = await session.execute(select(Document).where(Document.id == document_id))
             doc = result.scalar_one_or_none()
             if doc:
@@ -87,23 +102,19 @@ async def _process_document(
                 doc.chunk_count = len(chunks)
                 await session.commit()
 
-        logger.info(f"Document {document_id} processed successfully")
+        logger.info("Document %s processed successfully", document_id)
 
-    except Exception as e:
-        logger.error(f"Error processing document {document_id}: {e}", exc_info=True)
-        async with SessionLocal() as session:
-            result = await session.execute(select(Document).where(Document.id == document_id))
-            doc = result.scalar_one_or_none()
-            if doc:
-                doc.status = "failed"
-                doc.error_message = str(e)[:500]  # Truncate to avoid huge error texts
-                await session.commit()
+    except OllamaServiceError as exc:
+        logger.warning("Document %s processing stopped: %s", document_id, exc)
+        await mark_document_failed(exc.user_message)
+    except Exception as exc:
+        logger.error("Error processing document %s: %s", document_id, exc, exc_info=True)
+        await mark_document_failed(str(exc))
     finally:
-        await engine.dispose()
-        # Clean up the uploaded file
         try:
             if os.path.exists(file_path):
                 os.remove(file_path)
+                logger.info("Removed temporary upload file for document %s", document_id)
         except Exception:
             pass
 
@@ -115,8 +126,12 @@ async def upload_document(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Upload a document (PDF, DOCX, or TXT) for RAG processing."""
-    # Validate file extension
+    """Upload a document for RAG processing."""
+    logger.info(
+        "Upload request received | user_id=%s | filename=%s",
+        current_user.id,
+        file.filename or "unknown",
+    )
     file_ext = _get_file_extension(file.filename or "")
     if file_ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(
@@ -124,28 +139,32 @@ async def upload_document(
             detail=f"Unsupported file type. Allowed: {', '.join(ALLOWED_EXTENSIONS)}",
         )
 
-    # Read file content
     content = await file.read()
     file_size = len(content)
 
     if file_size > MAX_FILE_SIZE:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024*1024)} MB",
+            detail=f"File too large. Maximum size: {MAX_FILE_SIZE // (1024 * 1024)} MB",
         )
 
     if file_size == 0:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
+    logger.info(
+        "Validated upload | user_id=%s | filename=%s | file_type=%s | size_bytes=%s",
+        current_user.id,
+        file.filename or "unknown",
+        file_ext,
+        file_size,
+    )
 
-    # Save file to disk temporarily
-    upload_dir = os.path.join(settings.UPLOAD_DIR, current_user.id)
+    upload_dir = os.path.join(settings.resolved_upload_dir, current_user.id)
     os.makedirs(upload_dir, exist_ok=True)
 
-    file_path = os.path.join(upload_dir, f"{file.filename}")
-    with open(file_path, "wb") as f:
-        f.write(content)
+    file_path = os.path.join(upload_dir, file.filename or "upload.bin")
+    with open(file_path, "wb") as saved_file:
+        saved_file.write(content)
 
-    # Create document record
     document = Document(
         user_id=current_user.id,
         filename=file.filename or "unknown",
@@ -156,14 +175,18 @@ async def upload_document(
     db.add(document)
     await db.flush()
 
-    # Start background processing
     background_tasks.add_task(
         _process_document,
         document_id=document.id,
         user_id=current_user.id,
         file_path=file_path,
         file_type=file_ext,
-        db_url=settings.DATABASE_URL,
+    )
+    logger.info(
+        "Queued background processing | document_id=%s | user_id=%s | filename=%s",
+        document.id,
+        current_user.id,
+        document.filename,
     )
 
     return document
@@ -180,7 +203,9 @@ async def list_documents(
         .where(Document.user_id == current_user.id)
         .order_by(Document.created_at.desc())
     )
-    return result.scalars().all()
+    documents = result.scalars().all()
+    logger.info("Listed %s documents for user %s", len(documents), current_user.id)
+    return documents
 
 
 @router.delete("/{document_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -189,7 +214,8 @@ async def delete_document(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """Delete a document and its associated vector embeddings."""
+    """Delete a document and its associated indexed chunks."""
+    logger.info("Delete document request | user_id=%s | document_id=%s", current_user.id, document_id)
     result = await db.execute(
         select(Document).where(Document.id == document_id, Document.user_id == current_user.id)
     )
@@ -198,8 +224,6 @@ async def delete_document(
     if not document:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
-    # Delete vectors from Milvus
-    delete_document_chunks(current_user.id, document_id)
-
-    # Delete from database
+    await delete_document_chunks(current_user.id, document_id)
     await db.delete(document)
+    logger.info("Deleted document metadata | user_id=%s | document_id=%s", current_user.id, document_id)

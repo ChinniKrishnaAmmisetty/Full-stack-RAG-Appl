@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from slowapi import Limiter
 from slowapi.util import get_remote_address
 from app.database import get_db
@@ -23,24 +23,30 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @limiter.limit("3/minute")
 async def register(request: Request, data: UserRegister, db: AsyncSession = Depends(get_db)):
     """Register a new user account."""
+    username = data.username.strip()
+    email = data.email.strip().lower()
+    logger.info("Register request | username=%s | email=%s", username, email)
     # Check if email already exists
-    result = await db.execute(select(User).where(User.email == data.email))
+    result = await db.execute(select(User).where(func.lower(User.email) == email))
     if result.scalar_one_or_none():
+        logger.warning("Registration blocked | email already registered | email=%s", email)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
     # Check if username already exists
-    result = await db.execute(select(User).where(User.username == data.username))
+    result = await db.execute(select(User).where(func.lower(User.username) == username.lower()))
     if result.scalar_one_or_none():
+        logger.warning("Registration blocked | username already taken | username=%s", username)
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Username already taken")
 
     # Create user
     user = User(
-        email=data.email,
-        username=data.username,
+        email=email,
+        username=username,
         hashed_password=hash_password(data.password),
     )
     db.add(user)
     await db.flush()
+    logger.info("Registration succeeded | user_id=%s | username=%s", user.id, user.username)
 
     token = create_access_token(data={"sub": user.id})
     return Token(access_token=token)
@@ -49,17 +55,36 @@ async def register(request: Request, data: UserRegister, db: AsyncSession = Depe
 @router.post("/login", response_model=Token)
 @limiter.limit("5/minute")
 async def login(request: Request, data: UserLogin, db: AsyncSession = Depends(get_db)):
-    """Authenticate with username + password and receive a JWT token."""
-    result = await db.execute(select(User).where(User.username == data.username))
+    """Authenticate with username/email + password and receive a JWT token."""
+    identifier = data.username.strip()
+    normalized_identifier = identifier.lower()
+    logger.info("Login request | identifier=%s", identifier)
+    result = await db.execute(
+        select(User).where(
+            or_(
+                func.lower(User.username) == normalized_identifier,
+                func.lower(User.email) == normalized_identifier,
+            )
+        )
+    )
     user = result.scalar_one_or_none()
 
     if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="plz register don't have account")
+        logger.warning("Login failed | user not found | identifier=%s", identifier)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password",
+        )
         
     if not verify_password(data.password, user.hashed_password):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="incorrect password or username")
+        logger.warning("Login failed | bad password | user_id=%s | username=%s", user.id, user.username)
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid username/email or password",
+        )
 
     token = create_access_token(data={"sub": user.id})
+    logger.info("Login succeeded | user_id=%s | username=%s", user.id, user.username)
     return Token(access_token=token)
 
 
@@ -119,4 +144,3 @@ async def reset_password(request: Request, data: ResetPasswordRequest, db: Async
     except Exception as e:
         logger.error(f"Error resetting password: {e}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid or expired reset token")
-

@@ -1,74 +1,117 @@
+# Full Stack RAG Chatbot
 
-# Multi-RAG Chatbot System
+A full-stack Retrieval-Augmented Generation (RAG) application for uploading documents, indexing them locally, and asking grounded questions through a React + FastAPI workspace.
 
-A production-grade Retrieval Augmented Generation (RAG) chatbot that lets users upload documents and ask questions powered by AI.
+![Python](https://img.shields.io/badge/Python-3.11+-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![React](https://img.shields.io/badge/React-18-blue) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-configured-blue) ![Ollama](https://img.shields.io/badge/Ollama-local-green)
 
-![Python](https://img.shields.io/badge/Python-3.11+-blue) ![FastAPI](https://img.shields.io/badge/FastAPI-0.115-green) ![React](https://img.shields.io/badge/React-18-blue) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-blue) ![Milvus](https://img.shields.io/badge/Milvus-2.4-purple) ![Gemini](https://img.shields.io/badge/Gemini-API-orange)
+## Current Implementation
+
+This repository currently runs with:
+
+- React + Vite on the frontend
+- FastAPI on the backend
+- SQLAlchemy models for users, documents, chat sessions, messages, and document chunks
+- PostgreSQL + SQLAlchemy + asyncpg in the current `backend/environment/.env` configuration
+- SQLite remains available only as a fallback when `DATABASE_URL` is not provided
+- Ollama for embeddings (`nomic-embed-text`) and generation (`qwen2.5:1.5b`)
+- Hybrid retrieval using vector similarity + keyword search
+- Cross-encoder reranking
+- An experimental reinforcement learning evaluation path for retrieval policy selection
+
+Important: the working app stores chunk embeddings in the application database. It does not require a separate vector database for the current local setup.
 
 ## Architecture
 
+```text
+Frontend (React + Vite)
+  -> Backend API (FastAPI)
+  -> PostgreSQL + SQLAlchemy + asyncpg storage for users, documents, sessions, messages, and chunk embeddings
+  -> Local retrieval layer:
+       - dense similarity search over stored chunk embeddings
+       - keyword search
+       - weighted hybrid merge
+       - cross-encoder reranking
+  -> Ollama:
+       - nomic-embed-text for embeddings
+       - qwen2.5:1.5b for answer generation
 ```
-Frontend (React + Vite)  →  Backend (FastAPI)  →  PostgreSQL (users, docs, chat)
-                                               →  Milvus (vector database)
-                                               →  gemini-embedding-001 (embeddings)
-                                               →  Gemini API (LLM responses)
-```
+
+Detailed documentation diagrams:
+
+- `docs/ARCHITECTURE_AND_FLOW.md` - detailed architecture, database, upload flow, RAG flow, SSE sequence, and RL flow diagrams
 
 ## Features
 
-- **Authentication**: JWT-based login/register (username-based login) with bcrypt password hashing and password recovery flow
-- **Document Upload**: PDF, DOCX, TXT — text extraction, chunking, embedding
-- **Isolated Knowledge Bases**: Each user has their own vector namespace
-- **RAG Pipeline**: gemini-embedding-001 embeddings + Milvus vector search + Gemini API
-- **Hybrid Search**: Vector similarity search + keyword-based search with re-ranking
-- **Streaming Responses**: Real-time streamed AI answers with markdown rendering
-- **Google OAuth**: Optional Google sign-in alongside email/password auth
-- **Chat Interface**: ChatGPT-like UI with chat history and markdown rendering
-- **Document Management**: Upload, view status, and delete documents
-- **Scalability**: Async APIs, connection pooling, background processing, rate limiting
-
-## Prerequisites
-
-- **Python 3.11+**
-- **Node.js 18+** and npm
-- **PostgreSQL 14+** (running and accessible)
-- **Docker & Docker Compose** (for Milvus vector database)
-- **Gemini API Key** (from [Google AI Studio](https://aistudio.google.com/))
+- JWT authentication with register, login, current-user, and development-mode password reset flow
+- Document upload and processing for `pdf`, `docx`, `txt`, `csv`, `xlsx`, and `md`
+- Background extraction, recursive chunking, embedding generation, and indexing
+- Session-based chat history
+- Streaming assistant responses with source attribution
+- Dashboard and document management pages
+- Local health checks for both the backend and Ollama
+- Evaluation scripts for baseline, reranker, and RL-based retrieval experiments
 
 ## Quick Start
 
-### 1. Clone & Configure
+### 1. Install and prepare Ollama
+
+Install Ollama and make sure it is running locally. Pull the required models:
 
 ```bash
-cd backend
-copy .env.example .env
-# Edit .env with your values:
-#   DATABASE_URL=postgresql+asyncpg://postgres:yourpassword@localhost:5432/rag_chatbot
-#   SECRET_KEY=a-random-secret-key
-#   GEMINI_API_KEY=your-gemini-api-key
+ollama pull qwen2.5:1.5b
+ollama pull nomic-embed-text
 ```
 
-### 2. Create the PostgreSQL Database
+If Ollama is not already running as a background service, start it with:
 
-```sql
-CREATE DATABASE rag_chatbot;
+```bash
+ollama serve
 ```
 
-### 3. Backend Setup
+### 2. Start the backend
 
 ```bash
 cd backend
 python -m venv venv
-venv\Scripts\activate        # On Windows
-# source venv/bin/activate   # On macOS/Linux
-
+venv\Scripts\activate
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-> **Note**: Make sure Milvus is running before starting the backend (see Docker Compose section below). The database tables are auto-created on startup.
+In the current repository configuration, the backend uses PostgreSQL + SQLAlchemy + asyncpg through `backend/environment/.env`.
 
-### 4. Frontend Setup
+### 3. Backend environment configuration
+
+The backend loads settings from:
+
+```text
+backend/environment/.env
+```
+
+If that file does not exist, the app falls back to the defaults defined in `backend/app/config.py`, including local SQLite.
+
+The current checked-in environment template and active local configuration point to PostgreSQL + SQLAlchemy + asyncpg.
+
+If you want to create or change an `.env` file, note that:
+
+- `backend/environment/.env` in this workspace is configured for PostgreSQL
+- `backend/environment/.env.example` also contains a PostgreSQL `DATABASE_URL`
+- if `DATABASE_URL` is removed entirely, the code falls back to SQLite from `backend/app/config.py`
+- if you want SQLite instead, set a SQLite URL explicitly
+
+Example SQLite value:
+
+```text
+DATABASE_URL=sqlite+aiosqlite:///./data/rag_chatbot.db
+```
+
+Example PostgreSQL format:
+
+```text
+DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>:5432/<database_name>
+```
+
+### 4. Start the frontend
 
 ```bash
 cd frontend
@@ -76,158 +119,110 @@ npm install
 npm run dev
 ```
 
-### 5. Open the App
+Open the frontend at the local Vite URL printed in the terminal, usually:
 
-Navigate to **http://localhost:5173** in your browser.
+```text
+http://127.0.0.1:5173
+```
 
-## API Endpoints
+## Frontend Environment
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| `POST` | `/api/auth/register` | Register a new user |
-| `POST` | `/api/auth/login` | Login (via username) and get JWT token |
-| `GET` | `/api/auth/me` | Get current user info |
-| `POST` | `/api/auth/forgot-password` | Generate password reset token |
+The frontend development proxy template is stored in:
+
+```text
+.env.example
+```
+
+The main variable is:
+
+```text
+VITE_API_PROXY_TARGET=http://127.0.0.1:8000
+```
+
+## Key Endpoints
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/health` | Backend database and chunk-store health |
+| `GET` | `/api/health/ollama` | Ollama generation and embedding diagnostics |
+| `POST` | `/api/auth/register` | Create a user |
+| `POST` | `/api/auth/login` | Sign in with username or email |
+| `GET` | `/api/auth/me` | Load current user |
+| `POST` | `/api/auth/forgot-password` | Generate a development reset token |
 | `POST` | `/api/auth/reset-password` | Reset password using token |
-| `POST` | `/api/documents/upload` | Upload a document (multipart) |
-| `GET` | `/api/documents/` | List user's documents |
-| `DELETE` | `/api/documents/{id}` | Delete a document |
+| `POST` | `/api/documents/upload` | Upload and index a document |
+| `GET` | `/api/documents/` | List current user documents |
+| `DELETE` | `/api/documents/{document_id}` | Delete a document and its chunks |
 | `POST` | `/api/chat/sessions` | Create a chat session |
 | `GET` | `/api/chat/sessions` | List chat sessions |
-| `GET` | `/api/chat/sessions/{id}/messages` | Get session messages |
-| `POST` | `/api/chat/sessions/{id}/messages` | Send message (RAG) |
+| `GET` | `/api/chat/sessions/{id}/messages` | Get messages for a session |
+| `POST` | `/api/chat/sessions/{id}/messages` | Non-streaming RAG response |
+| `POST` | `/api/chat/sessions/{id}/messages/stream` | Streaming RAG response via SSE |
 | `DELETE` | `/api/chat/sessions/{id}` | Delete a chat session |
-| `GET` | `/api/health` | Health check |
+| `POST` | `/api/chat/rl/query` | Run the experimental RL retrieval path |
 
-## Folder Structure
+## Project Structure
 
-```
-RAG_chatbot/
-├── docker-compose.yml           # Milvus, PostgreSQL, Backend, Frontend
-├── .env.example                 # Environment variable template
-├── backend/
-│   ├── app/
-│   │   ├── main.py              # FastAPI app entry
-│   │   ├── config.py            # Settings from .env
-│   │   ├── database.py          # Async SQLAlchemy
-│   │   ├── models.py            # ORM models
-│   │   ├── schemas.py           # Pydantic schemas
-│   │   ├── auth.py              # JWT + bcrypt
-│   │   ├── routers/
-│   │   │   ├── auth_router.py
-│   │   │   ├── document_router.py
-│   │   │   └── chat_router.py
-│   │   └── services/
-│   │       ├── document_service.py   # Text extraction + chunking
-│   │       ├── embedding_service.py  # gemini-embedding-001
-│   │       ├── vector_service.py     # Milvus operations
-│   │       └── rag_service.py        # RAG pipeline + Gemini
-│   ├── environment/.env
-│   └── requirements.txt
-├── frontend/
-│   ├── src/
-│   │   ├── App.jsx
-│   │   ├── api.js
-│   │   ├── main.jsx
-│   │   ├── context/AuthContext.jsx
-│   │   ├── pages/
-│   │   │   ├── LoginPage.jsx
-│   │   │   ├── RegisterPage.jsx
-│   │   │   ├── ForgotPasswordPage.jsx
-│   │   │   ├── ResetPasswordPage.jsx
-│   │   │   └── ChatPage.jsx
-│   │   ├── components/
-│   │   │   ├── Sidebar.jsx
-│   │   │   ├── ChatMessage.jsx
-│   │   │   ├── ChatInput.jsx
-│   │   │   ├── FileUpload.jsx
-│   │   │   ├── DocumentList.jsx
-│   │   │   ├── SettingsModal.jsx
-│   │   │   ├── AiBot.jsx
-│   │   │   └── MatrixBackground.jsx
-│   │   ├── utils/
-│   │   └── index.css
-│   ├── package.json
-│   └── vite.config.js
-└── README.md
-```
+### Backend
 
-## Docker Compose Deployment
+- `backend/app/main.py` - FastAPI app startup, middleware, and health routes
+- `backend/app/config.py` - environment-backed settings
+- `backend/app/database.py` - async database engine and session setup
+- `backend/app/models.py` - ORM models for users, documents, chunks, sessions, and messages
+- `backend/app/auth.py` - JWT and password hashing utilities
+- `backend/app/routers/auth_router.py` - auth endpoints
+- `backend/app/routers/document_router.py` - upload, list, and delete document endpoints
+- `backend/app/routers/chat_router.py` - chat, streaming, session, and RL endpoints
+- `backend/app/services/document_service.py` - extraction, validation, and chunking
+- `backend/app/services/embedding_service.py` - Ollama embedding calls
+- `backend/app/services/vector_service.py` - local vector search and keyword search
+- `backend/app/services/rag_service.py` - prompt building, retrieval merge, reranking, and generation
+- `backend/app/services/ollama_service.py` - Ollama client helpers and normalized errors
+- `backend/app/evaluation/` - retrieval evaluation helpers
+- `backend/evaluation_runner.py` - baseline/reranker/RL evaluation runner
+- `backend/retrieval_policy.py` - RL state and action logic
+- `backend/reward_function.py` - RL reward calculation
+- `backend/rl_agent.py` - tabular Q-learning agent
 
-The project includes a full `docker-compose.yml` that spins up all services:
+### Frontend
 
-```bash
-# Start all services (Milvus + dependencies, PostgreSQL, Backend, Frontend)
-docker compose up -d
+- `frontend/src/App.jsx` - route setup
+- `frontend/src/api.js` - API client and streaming helpers
+- `frontend/src/context/AuthContext.jsx` - auth state management
+- `frontend/src/context/ThemeContext.jsx` - theme state management
+- `frontend/src/pages/ChatPage.jsx` - main chat workspace
+- `frontend/src/pages/Documents.jsx` - upload and document management UI
+- `frontend/src/pages/Dashboard.jsx` - workspace overview page
+- `frontend/src/components/Sidebar.jsx` - navigation and chat session list
+- `frontend/src/components/ChatMessage.jsx` - answer and source rendering
+- `frontend/src/components/InputBox.jsx` - chat input and voice capture
+- `frontend/src/components/AnalyticsPanel.jsx` - chat analytics side panel
 
-# Check service health
-docker compose ps
+## Evaluation and RL
 
-# View logs
-docker compose logs -f backend
-```
+The repository includes scripts and saved outputs for retrieval and policy evaluation:
 
-**Services included:**
+- `backend/evaluate.py` - retrieval evaluation CLI
+- `backend/evaluation_runner.py` - baseline, reranker, RL training, RL evaluation, and summary generation
+- `backend/plots.py` - builds comparison plots from saved results
+- `backend/results/` - saved JSON, CSV, and graph artifacts
+- `backend/qtable.json` - saved Q-table for the RL policy
 
-| Service | Image | Port | Purpose |
-|---------|-------|------|---------|
-| `milvus` | milvusdb/milvus:v2.4.13 | 19530 | Vector database |
-| `postgres` | postgres:16-alpine | — | Relational database |
-| `etcd` | coreos/etcd:v3.5.16 | — | Milvus metadata store |
-| `minio` | minio/minio | — | Milvus object storage |
-| `backend` | Custom (FastAPI) | 8000 | API server |
-| `frontend` | Custom (React) | 5173 | Web UI |
+These evaluation tools are separate from the normal chat flow. The standard chat experience uses the main hybrid retrieval + reranking pipeline.
 
-## Production Deployment
+## Notes
 
-### Scale the Backend
+- Document vectors are stored locally in the application database for a simple, Docker-free setup.
+- The current implementation is optimized for local development and project demonstration rather than large-scale production retrieval.
+- Password reset is a development workflow in this repository; the reset token is returned by the API instead of being emailed.
 
-```bash
-# Run with multiple workers
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+## Environment Files
 
-# Or use gunicorn with uvicorn workers
-pip install gunicorn
-gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
-```
+- `backend/environment/.env` - active backend environment file loaded by the app
+- `backend/environment/.env.example` - backend template with example values
+- `.env.example` - frontend Vite proxy template
 
-### Build the Frontend
-
-```bash
-cd frontend
-npm run build
-# Serve the dist/ folder with nginx or any static file server
-```
-
-### Environment Checklist
-
-- [ ] Set a strong `SECRET_KEY` (use `openssl rand -hex 32`)
-- [ ] Configure database credentials (`DB_HOST`, `DB_USER`, `DB_PASSWORD`)
-- [ ] Set `GEMINI_API_KEY`
-- [ ] Configure `MILVUS_HOST` and `MILVUS_PORT`
-- [ ] Set `GOOGLE_CLIENT_ID` (if using Google OAuth)
-- [ ] Use HTTPS in production
-- [ ] Set up a reverse proxy (nginx) for frontend + API
-- [ ] Configure proper CORS origins in `main.py`
-
-## Tech Stack
-
-| Layer | Technology |
-|-------|------------|
-| **Frontend** | React 18, Vite |
-| **Backend** | FastAPI (Python 3.11+) |
-| **Database** | PostgreSQL 16 |
-| **Vector DB** | Milvus 2.4 |
-| **Embeddings** | gemini-embedding-001 (3072-dim) |
-| **LLM** | Gemini API |
-| **Auth** | JWT + bcrypt, Google OAuth |
-| **Infra** | Docker Compose |
-
-## System Prompt
-
-The chatbot follows a strict document-only answering rule:
-
-> *"You are a document assistant. Answer questions strictly based on the provided document context. Do not use external knowledge. If the answer cannot be found, respond: 'I could not find the answer in the uploaded documents.'"*
+Do not commit real `.env` files or secrets.
 
 ## License
 

@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect } from 'react';
-import { getMe } from '../api';
+import { clearStoredToken, getMe, getStoredToken, pingBackend, setStoredToken } from '../api';
 
 const AuthContext = createContext(null);
 
@@ -8,12 +8,28 @@ export function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const token = localStorage.getItem('token');
+    if (import.meta.env.DEV) {
+      pingBackend()
+        .then((res) => {
+          console.info('[auth] backend reachable', {
+            status: res.status,
+            requestId: res.headers['x-request-id'],
+          });
+        })
+        .catch((error) => {
+          console.error('[auth] backend ping failed', {
+            message: error.message,
+            status: error.response?.status,
+          });
+        });
+    }
+
+    const token = getStoredToken();
     if (token) {
-      getMe()
+      getMe(token)
         .then((res) => setUser(res.data))
         .catch(() => {
-          localStorage.removeItem('token');
+          clearStoredToken();
           setUser(null);
         })
         .finally(() => setLoading(false));
@@ -22,13 +38,22 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  const login = (token, userData) => {
-    localStorage.setItem('token', token);
-    setUser(userData);
+  const login = async (token) => {
+    setStoredToken(token);
+
+    try {
+      const response = await getMe(token);
+      setUser(response.data);
+      return response.data;
+    } catch (error) {
+      clearStoredToken();
+      setUser(null);
+      throw error;
+    }
   };
 
   const logout = () => {
-    localStorage.removeItem('token');
+    clearStoredToken();
     setUser(null);
   };
 

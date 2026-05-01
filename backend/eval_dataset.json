@@ -1,0 +1,152 @@
+[
+  {
+    "id": "q1",
+    "query": "What is Python programming language?",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "Python is a high-level programming language used for general-purpose programming."
+  },
+  {
+    "id": "q2",
+    "query": "What is FastAPI used for?",
+    "expected_document_name": "FastAPI.pdf",
+    "expected_answer": "FastAPI is a Python framework used to build APIs quickly and efficiently."
+  },
+  {
+    "id": "q3",
+    "query": "What is Git used for?",
+    "expected_document_name": "Git.pdf",
+    "expected_answer": "Git is a version control system used to track changes in code."
+  },
+  {
+    "id": "q4",
+    "query": "What is machine learning?",
+    "expected_document_name": "Machine_learning.pdf",
+    "expected_answer": "Machine learning is a field of AI that enables systems to learn from data."
+  },
+  {
+    "id": "q5",
+    "query": "What are neural networks?",
+    "expected_document_name": "Neural_network_(machine_learning).pdf",
+    "expected_answer": "Neural networks are models inspired by the human brain used in machine learning."
+  },
+  {
+    "id": "q6",
+    "query": "What is reinforcement learning?",
+    "expected_document_name": "Reinforcement_learning.pdf",
+    "expected_answer": "Reinforcement learning is a method where agents learn using rewards and penalties."
+  },
+  {
+    "id": "q7",
+    "query": "What is retrieval-augmented generation?",
+    "expected_document_name": "Retrieval-augmented_generation.pdf",
+    "expected_answer": "RAG combines document retrieval with text generation."
+  },
+  {
+    "id": "q8",
+    "query": "What is SQL used for?",
+    "expected_document_name": "SQL.pdf",
+    "expected_answer": "SQL is used to manage and query relational databases."
+  },
+  {
+    "id": "q9",
+    "query": "Which language is used for general purpose programming and scripting?",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "Python is used for general-purpose programming and scripting."
+  },
+  {
+    "id": "q10",
+    "query": "Which Python framework helps build APIs quickly?",
+    "expected_document_name": "FastAPI.pdf",
+    "expected_answer": "FastAPI helps developers build APIs quickly in Python."
+  },
+  {
+    "id": "q11",
+    "query": "Which tool helps track and manage code versions?",
+    "expected_document_name": "Git.pdf",
+    "expected_answer": "Git is used to track and manage code versions."
+  },
+  {
+    "id": "q12",
+    "query": "Which field of AI focuses on learning patterns from data?",
+    "expected_document_name": "Machine_learning.pdf",
+    "expected_answer": "Machine learning focuses on learning patterns from data."
+  },
+  {
+    "id": "q13",
+    "query": "Which models are inspired by the human brain?",
+    "expected_document_name": "Neural_network_(machine_learning).pdf",
+    "expected_answer": "Neural networks are inspired by the human brain."
+  },
+  {
+    "id": "q14",
+    "query": "Which learning approach uses rewards and penalties?",
+    "expected_document_name": "Reinforcement_learning.pdf",
+    "expected_answer": "Reinforcement learning uses rewards and penalties."
+  },
+  {
+    "id": "q15",
+    "query": "Which method combines document retrieval with generation?",
+    "expected_document_name": "Retrieval-augmented_generation.pdf",
+    "expected_answer": "RAG combines retrieval with generation."
+  },
+  {
+    "id": "q16",
+    "query": "Which language is used to query relational databases?",
+    "expected_document_name": "SQL.pdf",
+    "expected_answer": "SQL is used to query relational databases."
+  },
+  {
+    "id": "q17",
+    "query": "How is Python used in software development?",
+    "expected_document_name": "Python_(programming_language).pdf",
+    "expected_answer": "Python is used for building applications, automation, and scripting."
+  },
+  {
+    "id": "q18",
+    "query": "How can developers create APIs efficiently in Python?",
+    "expected_document_name": "FastAPI.pdf",
+    "expected_answer": "Developers use FastAPI to efficiently build APIs in Python."
+  },
+  {
+    "id": "q19",
+    "query": "How do teams collaborate on code using version control?",
+    "expected_document_name": "Git.pdf",
+    "expected_answer": "Teams use Git to collaborate and manage code changes."
+  },
+  {
+    "id": "q20",
+    "query": "How do systems learn from datasets automatically?",
+    "expected_document_name": "Machine_learning.pdf",
+    "expected_answer": "Systems learn patterns from datasets using machine learning."
+  },
+  {
+    "id": "q21",
+    "query": "How do neural networks process information?",
+    "expected_document_name": "Neural_network_(machine_learning).pdf",
+    "expected_answer": "Neural networks process data through layers of interconnected nodes."
+  },
+  {
+    "id": "q22",
+    "query": "How do agents improve decisions through interaction?",
+    "expected_document_name": "Reinforcement_learning.pdf",
+    "expected_answer": "Agents improve decisions using rewards in reinforcement learning."
+  },
+  {
+    "id": "q23",
+    "query": "How can external knowledge improve LLM outputs?",
+    "expected_document_name": "Retrieval-augmented_generation.pdf",
+    "expected_answer": "External knowledge improves outputs through retrieval in RAG."
+  },
+  {
+    "id": "q24",
+    "query": "How is data retrieved and managed in databases?",
+    "expected_document_name": "SQL.pdf",
+    "expected_answer": "Data is retrieved and managed using SQL queries."
+  },
+  {
+    "id": "q25",
+    "query": "Why is SQL important for data management?",
+    "expected_document_name": "SQL.pdf",
+    "expected_answer": "SQL is important because it enables structured data management and querying."
+  }
+]

@@ -1,19 +1,29 @@
 """Async SQLAlchemy database engine and session management."""
 
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from pathlib import Path
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
+
 from app.config import get_settings
 
 settings = get_settings()
+database_url = settings.resolved_database_url
 
-engine = create_async_engine(
-    settings.DATABASE_URL,
-    echo=False,
-    pool_size=20,
-    max_overflow=10,
-    pool_pre_ping=True,
-    pool_recycle=300,
-)
+engine_kwargs: dict = {"echo": False}
+if database_url.startswith("sqlite"):
+    sqlite_path = database_url.split("///", 1)[1]
+    Path(sqlite_path).parent.mkdir(parents=True, exist_ok=True)
+    engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+else:
+    engine_kwargs.update(
+        pool_size=20,
+        max_overflow=10,
+        pool_pre_ping=True,
+        pool_recycle=300,
+    )
+
+engine = create_async_engine(database_url, **engine_kwargs)
 
 AsyncSessionLocal = async_sessionmaker(
     bind=engine,
@@ -42,5 +52,9 @@ async def get_db() -> AsyncSession:
 async def init_db():
     """Create all tables on startup."""
     async with engine.begin() as conn:
+        if database_url.startswith("sqlite"):
+            await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+            await conn.exec_driver_sql("PRAGMA foreign_keys=ON")
         from app import models  # noqa: F401
+
         await conn.run_sync(Base.metadata.create_all)

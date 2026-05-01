@@ -1,326 +1,383 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { useAuth } from '../context/AuthContext';
-import { getSessions, createSession, getMessages, sendMessage, streamMessage, deleteSession, uploadDocument, getDocuments, deleteDocument } from '../api';
-import Sidebar from '../components/Sidebar';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { FiBarChart2, FiMenu, FiTrash2, FiUploadCloud, FiX } from 'react-icons/fi';
+import { createSession, deleteSession, getDocuments, getMessages, getSessions, streamMessage } from '../api';
+import AnalyticsPanel from '../components/AnalyticsPanel';
 import ChatMessage from '../components/ChatMessage';
+import InputBox from '../components/InputBox';
 import SettingsModal from '../components/SettingsModal';
-import AiBot from '../components/AiBot';
-import { FiMenu, FiX, FiSend, FiPaperclip, FiFile, FiCheckCircle, FiLoader, FiAlertCircle, FiTrash2 } from 'react-icons/fi';
+import Sidebar from '../components/Sidebar';
+import { useAuth } from '../context/AuthContext';
+
+const getDefaultSidebarState = () => (typeof window === 'undefined' ? true : window.innerWidth >= 960);
+const getDefaultAnalyticsState = () => (typeof window === 'undefined' ? true : window.innerWidth >= 1280);
+const STATUS_ORDER = ['queued', 'embedding', 'retrieving', 'matching', 'generating'];
+const STATUS_TEMPLATE = {
+  queued: {
+    stage: 'queued',
+    step: 'Preparing request',
+    detail: 'Sending your question into the retrieval pipeline.',
+  },
+  embedding: {
+    stage: 'embedding',
+    step: 'Building query embedding',
+    detail: 'Converting your question for retrieval.',
+  },
+  retrieving: {
+    stage: 'retrieving',
+    step: 'Running hybrid search',
+    detail: 'Searching vector and keyword candidates in your documents.',
+  },
+  matching: {
+    stage: 'matching',
+    step: 'Extracting matching chunks',
+    detail: 'Selecting the best evidence from retrieved results.',
+  },
+  generating: {
+    stage: 'generating',
+    step: 'Generating grounded answer',
+    detail: 'Writing the response from the matched chunks.',
+  },
+};
+
+const mergeStatusSteps = (currentSteps = [], incomingStatus) => {
+  const incomingStage = incomingStatus.stage || 'generating';
+  const incomingIndex = STATUS_ORDER.indexOf(incomingStage);
+  const stageMap = new Map(currentSteps.map((step) => [step.stage, step]));
+  const previousStep = stageMap.get(incomingStage) || STATUS_TEMPLATE[incomingStage] || { stage: incomingStage };
+
+  stageMap.set(incomingStage, {
+    ...previousStep,
+    ...incomingStatus,
+    step: incomingStatus.step || previousStep.step,
+  });
+
+  return Array.from(stageMap.values())
+    .sort((left, right) => STATUS_ORDER.indexOf(left.stage) - STATUS_ORDER.indexOf(right.stage))
+    .map((step) => {
+      const stepIndex = STATUS_ORDER.indexOf(step.stage);
+      let state = step.state || 'pending';
+
+      if (incomingIndex >= 0 && stepIndex >= 0) {
+        if (stepIndex < incomingIndex) {
+          state = 'complete';
+        } else if (stepIndex === incomingIndex) {
+          state = 'active';
+        } else {
+          state = 'pending';
+        }
+      } else if (step.stage === incomingStage) {
+        state = 'active';
+      }
+
+      return { ...step, state };
+    });
+};
 
 export default function ChatPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [sessions, setSessions] = useState([]);
   const [activeSessionId, setActiveSessionId] = useState(null);
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [uploading, setUploading] = useState(false);
-  const [uploadStatus, setUploadStatus] = useState(null);
+  const [sidebarOpen, setSidebarOpen] = useState(getDefaultSidebarState);
   const [documents, setDocuments] = useState([]);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [sources, setSources] = useState([]);
+  const [showAnalytics, setShowAnalytics] = useState(getDefaultAnalyticsState);
+  const [responseTimes, setResponseTimes] = useState([]);
+  const [streamStatusLabel, setStreamStatusLabel] = useState('');
   const messagesEndRef = useRef(null);
-  const fileInputRef = useRef(null);
-  const textareaRef = useRef(null);
 
-  // Typing effect for welcome text
-  const fullWelcomeText = "Welcome to ACK AI";
-  const [welcomeText, setWelcomeText] = useState("");
-
-  useEffect(() => {
-    if (messages.length === 0) {
-      setWelcomeText("");
-      let i = 0;
-      const typeInterval = setInterval(() => {
-        if (i < fullWelcomeText.length) {
-          setWelcomeText(fullWelcomeText.substring(0, i + 1));
-          i++;
-        } else {
-          clearInterval(typeInterval);
-        }
-      }, 100);
-      return () => clearInterval(typeInterval);
-    }
-  }, [messages.length]);
-
-  useEffect(() => { loadSessions(); loadDocuments(); }, []);
-
-  // Poll documents every 5s while any are processing
-  useEffect(() => {
-    const hasProcessing = documents.some((d) => d.status === 'processing');
-    if (!hasProcessing) return;
-    const interval = setInterval(loadDocuments, 5000);
-    return () => clearInterval(interval);
-  }, [documents]);
-
-  useEffect(() => {
-    if (activeSessionId && !sending) loadMessages(activeSessionId);
-    else if (!activeSessionId) setMessages([]);
-  }, [activeSessionId]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
-    if (textareaRef.current) {
-      textareaRef.current.style.height = 'auto';
-      textareaRef.current.style.height = Math.min(textareaRef.current.scrollHeight, 150) + 'px';
-    }
-  }, [input]);
+  const currentSession = sessions.find((session) => session.id === activeSessionId) || null;
+  const readyDocs = documents.filter((document) => document.status === 'ready');
+  const hasReadyDocs = readyDocs.length > 0;
+  const averageResponseTimeMs = responseTimes.length
+    ? responseTimes.reduce((sum, value) => sum + value, 0) / responseTimes.length
+    : null;
 
   const loadSessions = async () => {
-    try { const res = await getSessions(); setSessions(res.data); }
-    catch (err) { console.error('Failed to load sessions:', err); }
+    try {
+      const response = await getSessions();
+      setSessions(response.data);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const loadMessages = async (sessionId) => {
-    try { const res = await getMessages(sessionId); setMessages(res.data); }
-    catch (err) { console.error('Failed to load messages:', err); }
+    try {
+      const response = await getMessages(sessionId);
+      setMessages(response.data);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
   const loadDocuments = async () => {
-    try { const res = await getDocuments(); setDocuments(res.data); }
-    catch (err) { console.error('Failed to load documents:', err); }
+    try {
+      const response = await getDocuments();
+      setDocuments(response.data);
+    } catch (error) {
+      console.error(error);
+    }
   };
 
-  const handleNewChat = () => { setActiveSessionId(null); setMessages([]); };
+  useEffect(() => {
+    loadSessions();
+    loadDocuments();
+  }, []);
 
-  const hasReadyDocs = documents.some((d) => d.status === 'ready');
+  useEffect(() => {
+    if (!documents.some((document) => document.status === 'processing')) {
+      return undefined;
+    }
 
-  const handleSendMessage = useCallback(async (content) => {
-    if (!content.trim() || sending) return;
+    const interval = window.setInterval(loadDocuments, 5000);
+    return () => window.clearInterval(interval);
+  }, [documents]);
+
+  useEffect(() => {
+    if (!activeSessionId) {
+      setMessages([]);
+      return;
+    }
+
+    if (!sending) {
+      loadMessages(activeSessionId);
+    }
+  }, [activeSessionId, sending]);
+
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages, sources, streamStatusLabel]);
+
+  const handleNewChat = () => {
+    setActiveSessionId(null);
+    setMessages([]);
+    setSources([]);
+    setInput('');
+    setStreamStatusLabel('');
+    if (typeof window !== 'undefined' && window.innerWidth < 960) {
+      setSidebarOpen(false);
+    }
+  };
+
+  const handleSend = useCallback(async () => {
+    const content = input.trim();
+    if (!content || sending) return;
+
+    const requestStartedAt = performance.now();
+    setInput('');
 
     let sessionId = activeSessionId;
     if (!sessionId) {
       try {
-        const res = await createSession(content.slice(0, 50));
-        sessionId = res.data.id;
-        setSessions((prev) => [res.data, ...prev]);
+        const response = await createSession(content.slice(0, 50));
+        sessionId = response.data.id;
+        setSessions((previousSessions) => [response.data, ...previousSessions]);
         setActiveSessionId(sessionId);
-      } catch (err) { console.error('Failed to create session:', err); return; }
+      } catch (error) {
+        console.error(error);
+        return;
+      }
     }
 
-    const tempUserMsg = { id: 'temp-user-' + Date.now(), role: 'user', content, created_at: new Date().toISOString() };
-    const tempAiMsgId = 'temp-ai-' + Date.now();
-    const tempAiMsg = { id: tempAiMsgId, role: 'assistant', content: '', created_at: new Date().toISOString(), loading: true };
-    setMessages((prev) => [...prev, tempUserMsg, tempAiMsg]);
+    const tempUserId = `temp-u-${Date.now()}`;
+    const tempAssistantId = `temp-a-${Date.now()}`;
+
+    setMessages((previousMessages) => [
+      ...previousMessages,
+      { id: tempUserId, role: 'user', content, created_at: new Date().toISOString() },
+      {
+        id: tempAssistantId,
+        role: 'assistant',
+        content: '',
+        created_at: new Date().toISOString(),
+        loading: true,
+        statusSteps: [],
+      },
+    ]);
+
     setSending(true);
+    setSources([]);
+    setStreamStatusLabel('');
 
     try {
-      await streamMessage(sessionId, content, {
-        onUserMessage: (savedUserMsg) => {
-          // Replace temp user message with saved one from DB
-          setMessages((prev) =>
-            prev.map((m) => (m.id === tempUserMsg.id ? { ...savedUserMsg } : m))
-          );
+      await streamMessage(sessionId, content, null, {
+        onUserMessage: (savedMessage) => {
+          setMessages((previousMessages) => previousMessages.map((message) => (
+            message.id === tempUserId ? { ...savedMessage } : message
+          )));
         },
-        onChunk: (textChunk) => {
-          // Append each chunk to the AI message in real-time
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempAiMsgId
-                ? { ...m, content: m.content + textChunk, loading: true }
-                : m
-            )
-          );
+        onChunk: (chunk) => {
+          setMessages((previousMessages) => previousMessages.map((message) => (
+            message.id === tempAssistantId
+              ? { ...message, content: `${message.content}${chunk}`, loading: true }
+              : message
+          )));
         },
-        onDone: (savedAssistantMsg) => {
-          // Replace temp AI message with the final saved version
-          setMessages((prev) =>
-            prev.map((m) => (m.id === tempAiMsgId ? { ...savedAssistantMsg, loading: false } : m))
-          );
+        onStatus: (statusUpdate) => {
+          setStreamStatusLabel(statusUpdate.step || 'Working in background');
+          setMessages((previousMessages) => previousMessages.map((message) => (
+            message.id === tempAssistantId
+              ? {
+                ...message,
+                loading: true,
+                statusSteps: mergeStatusSteps(message.statusSteps, statusUpdate),
+              }
+              : message
+          )));
+        },
+        onDone: (savedMessage) => {
+          setMessages((previousMessages) => previousMessages.map((message) => (
+            message.id === tempAssistantId ? { ...savedMessage, loading: false } : message
+          )));
+          setResponseTimes((previousTimes) => [...previousTimes, performance.now() - requestStartedAt]);
+          setStreamStatusLabel('');
           loadSessions();
         },
-        onError: (err) => {
-          console.error('Streaming failed:', err);
-          setMessages((prev) =>
-            prev.map((m) =>
-              m.id === tempAiMsgId
-                ? { ...m, content: 'Sorry, something went wrong. Please try again.', loading: false }
-                : m
-            )
-          );
+        onSources: (nextSources) => setSources(nextSources),
+        onMode: () => {},
+        onError: () => {
+          setStreamStatusLabel('');
+          setMessages((previousMessages) => previousMessages.map((message) => (
+            message.id === tempAssistantId
+              ? { ...message, content: 'Something went wrong. Please try again.', loading: false }
+              : message
+          )));
         },
       });
-    } catch (err) {
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === tempAiMsgId
-            ? { ...m, content: 'Sorry, something went wrong. Please try again.', loading: false }
-            : m
-        )
-      );
-    } finally { setSending(false); }
-  }, [activeSessionId, sending]);
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (input.trim() && !sending) {
-      handleSendMessage(input.trim());
-      setInput('');
+    } catch {
+      setMessages((previousMessages) => previousMessages.map((message) => (
+        message.id === tempAssistantId
+          ? { ...message, content: 'Something went wrong. Please try again.', loading: false }
+          : message
+      )));
+      setStreamStatusLabel('');
+    } finally {
+      setSending(false);
     }
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSubmit(e); }
-  };
-
-  const handleFileUpload = async (file) => {
-    if (!file) return;
-    const allowed = ['pdf', 'docx', 'txt', 'csv', 'xlsx', 'md'];
-    const ext = file.name.split('.').pop()?.toLowerCase();
-    if (!allowed.includes(ext)) { setUploadStatus({ type: 'error', msg: `Only ${allowed.join(', ')} allowed` }); return; }
-    if (file.size > 50 * 1024 * 1024) { setUploadStatus({ type: 'error', msg: 'File too large (max 50 MB)' }); return; }
-
-    setUploading(true);
-    setUploadStatus({ type: 'info', msg: `Uploading "${file.name}"...` });
-    try {
-      await uploadDocument(file);
-      setUploadStatus({ type: 'success', msg: `"${file.name}" uploaded! Processing...` });
-      loadDocuments();
-      setTimeout(() => setUploadStatus(null), 5000);
-    } catch (err) {
-      setUploadStatus({ type: 'error', msg: err.response?.data?.detail || 'Upload failed' });
-    } finally { setUploading(false); }
-  };
-
-  const handleDeleteDoc = async (docId) => {
-    try { await deleteDocument(docId); loadDocuments(); }
-    catch (err) { console.error('Failed to delete document:', err); }
-  };
+  }, [activeSessionId, input, sending]);
 
   const handleDeleteSession = async (sessionId) => {
     try {
       await deleteSession(sessionId);
-      setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-      if (activeSessionId === sessionId) { setActiveSessionId(null); setMessages([]); }
-    } catch (err) { console.error('Failed to delete session:', err); }
-  };
+      const remainingSessions = sessions.filter((session) => session.id !== sessionId);
+      setSessions(remainingSessions);
 
-  const getStatusIcon = (status) => {
-    switch (status) {
-      case 'ready': return <FiCheckCircle className="doc-status ready" />;
-      case 'failed': return <FiAlertCircle className="doc-status failed" />;
-      default: return <FiLoader className="doc-status processing" />;
+      if (activeSessionId === sessionId) {
+        setActiveSessionId(remainingSessions[0]?.id ?? null);
+        setMessages([]);
+        setSources([]);
+        setStreamStatusLabel('');
+      }
+    } catch (error) {
+      console.error(error);
     }
   };
 
   return (
-    <div className="chat-layout" id="chat-page">
-      <button className="mobile-menu-btn" onClick={() => setSidebarOpen(!sidebarOpen)} id="sidebar-toggle">
+    <div className="app-layout" id="chat-page">
+      <button className="mobile-menu-btn" onClick={() => setSidebarOpen((current) => !current)}>
         {sidebarOpen ? <FiX /> : <FiMenu />}
       </button>
 
       <Sidebar
-        sessions={sessions}
-        activeSessionId={activeSessionId}
-        onSelectSession={setActiveSessionId}
-        onNewChat={handleNewChat}
-        onDeleteSession={handleDeleteSession}
-        onDeleteDocument={handleDeleteDoc}
         isOpen={sidebarOpen}
         user={user}
-        documents={documents}
         onOpenSettings={() => setSettingsOpen(true)}
+        onCreateSession={handleNewChat}
+        sessions={sessions}
+        activeSessionId={activeSessionId}
+        onSelectSession={(sessionId) => {
+          setActiveSessionId(sessionId);
+          setSources([]);
+          if (typeof window !== 'undefined' && window.innerWidth < 960) {
+            setSidebarOpen(false);
+          }
+        }}
+        onDeleteSession={handleDeleteSession}
+        documents={documents}
+        onNavigate={() => {
+          if (typeof window !== 'undefined' && window.innerWidth < 960) {
+            setSidebarOpen(false);
+          }
+        }}
       />
 
       <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
 
-      <main className="chat-main-area" style={{ background: messages.length === 0 ? '#000000' : 'var(--bg-primary)' }}>
-        {/* Upload status toast */}
-        {uploadStatus && (
-          <div className={`upload-toast ${uploadStatus.type}`}>
-            {uploadStatus.msg}
-            <button onClick={() => setUploadStatus(null)}>×</button>
+      <main className="chat-main">
+        <header className="chat-header">
+          <div className="chat-title-group">
+            <h1>{currentSession?.title || 'AI Chatbot'}</h1>
+            <p>
+              {hasReadyDocs
+                ? `${readyDocs.length} document${readyDocs.length === 1 ? '' : 's'} ready for grounded answers`
+                : 'Upload documents to begin grounded conversations'}
+            </p>
           </div>
-        )}
 
-        {/* Messages or Welcome */}
-        <div className="chat-messages-scroll">
-          {messages.length === 0 ? (
-            <div className="welcome-container">
-              <div className="welcome-hero">
-                <div className="bot-mascot-container">
-                  <AiBot size={150} expression="happy" />
+          <div className="header-actions">
+            <button className="header-btn" onClick={() => navigate('/documents')}>
+              <FiUploadCloud /> Documents
+            </button>
+            <button className="header-btn" onClick={() => setShowAnalytics((current) => !current)}>
+              <FiBarChart2 /> {showAnalytics ? 'Hide panel' : 'Show panel'}
+            </button>
+            {activeSessionId && (
+              <button className="header-btn header-btn-danger" onClick={() => handleDeleteSession(activeSessionId)}>
+                <FiTrash2 /> Delete
+              </button>
+            )}
+          </div>
+        </header>
+
+        <div className="chat-shell">
+          <section className="messages-panel">
+            <div className="messages-area">
+              {messages.length === 0 ? (
+                <div className="empty-chat">
+                  <h2>Start a conversation</h2>
+                  <p>Ask a question from your uploaded documents.</p>
                 </div>
-                <h1 style={{ minHeight: '48px' }}>
-                   {messages.length === 0 && welcomeText.length > 0 ? (
-                     <span>
-                       {welcomeText.substring(0, 11)} 
-                       <span className="brand-gradient">{welcomeText.substring(11)}</span>
-                       <span className="typing-cursor"></span>
-                     </span>
-                   ) : (
-                     <span className="typing-cursor"></span>
-                   )}
-                </h1>
-              </div>
+              ) : (
+                <div className="messages-list">
+                  {messages.map((message, index) => (
+                    <ChatMessage
+                      key={message.id}
+                      message={message}
+                      sources={index === messages.length - 1 && message.role === 'assistant' ? sources : []}
+                    />
+                  ))}
+                  <div ref={messagesEndRef} />
+                </div>
+              )}
+            </div>
 
-              {/* Grid removed as per user request */}
-            </div>
-          ) : (
-            <div className="chat-messages-list">
-              {messages.map((msg) => (
-                <ChatMessage key={msg.id} message={msg} />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-
-        {/* Input Bar */}
-        <div className="chat-input-area">
-          {!hasReadyDocs && documents.length > 0 && (
-            <div className="processing-banner">
-              <FiLoader className="spin-icon" /> Documents are still processing. Please wait before asking questions.
-            </div>
-          )}
-          {documents.length === 0 && (
-            <div className="processing-banner info-banner">
-              📄 Upload a document first to start asking questions.
-            </div>
-          )}
-          <div className="chat-input-container">
-            <button
-              className="attach-btn"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
-              title="Upload document"
-              id="attach-btn"
-            >
-              {uploading ? <div className="mini-spinner"></div> : <FiPaperclip />}
-            </button>
-            <textarea
-              ref={textareaRef}
-              id="chat-input"
-              className="chat-textarea"
-              placeholder={hasReadyDocs ? 'Message RAG Assistant...' : 'Upload a document to start chatting...'}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              disabled={sending || !hasReadyDocs}
-              rows={1}
+            <InputBox
+              input={input}
+              setInput={setInput}
+              onSubmit={handleSend}
+              disabled={sending}
+              hasReadyDocs={hasReadyDocs}
+              processingLabel={streamStatusLabel}
             />
-            <button
-              type="button"
-              className={`send-msg-btn ${input.trim() && hasReadyDocs ? 'active' : ''}`}
-              onClick={handleSubmit}
-              disabled={sending || !input.trim() || !hasReadyDocs}
-              id="send-btn"
-              title="Send message"
-            >
-              <FiSend />
-            </button>
-          </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".pdf,.docx,.txt,.csv,.xlsx,.md"
-            onChange={(e) => { handleFileUpload(e.target.files[0]); e.target.value = ''; }}
-            hidden
-            id="file-input"
-          />
+          </section>
+
+          {showAnalytics && (
+            <AnalyticsPanel
+              sessions={sessions}
+              messages={messages}
+              sources={sources}
+              onClose={() => setShowAnalytics(false)}
+              averageResponseTimeMs={averageResponseTimeMs}
+              rerankerUsed={null}
+            />
+          )}
         </div>
       </main>
     </div>

@@ -1,0 +1,4 @@
+variant,recall_at_k,precision_at_k,mrr,hit_rate,semantic_similarity,avg_latency_seconds,avg_reward
+baseline,0.9200,0.1840,0.7933,0.9200,0.7900,96.1290,N/A
+reranker,0.9200,0.1840,0.9200,0.9200,0.7976,91.9111,N/A
+rl,0.8800,0.2720,0.8200,0.8800,0.7922,114.8612,0.2895

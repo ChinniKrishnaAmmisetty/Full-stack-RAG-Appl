@@ -1,218 +1,262 @@
-"""Vector database operations using Milvus with per-user isolated collections."""
+"""Local vector store operations backed by the application database."""
 
 import logging
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
-from app.config import get_settings
+import math
+
+from sqlalchemy import delete, select
+
+from app.database import AsyncSessionLocal
+from app.models import DocumentChunk
 
 logger = logging.getLogger(__name__)
-settings = get_settings()
 
-# Embedding dimension for Gemini gemini-embedding-001
-EMBEDDING_DIM = 3072
-
-_connected = False
-
-
-def _ensure_connection():
-    """Ensure connection to Milvus server."""
-    global _connected
-    if not _connected:
-        connections.connect(
-            alias="default",
-            host=settings.MILVUS_HOST,
-            port=settings.MILVUS_PORT,
-        )
-        _connected = True
-        logger.info(f"Connected to Milvus at {settings.MILVUS_HOST}:{settings.MILVUS_PORT}")
-
-
-def _get_or_create_collection() -> Collection:
-    """Get or create the global Milvus collection for all users."""
-    _ensure_connection()
-    col_name = "rag_documents"
-
-    if utility.has_collection(col_name):
-        collection = Collection(col_name)
-        collection.load()
-        return collection
-
-    # Define schema with user_id for metadata filtering
-    fields = [
-        FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=200, is_primary=True),
-        FieldSchema(name="user_id", dtype=DataType.VARCHAR, max_length=36),
-        FieldSchema(name="document_id", dtype=DataType.VARCHAR, max_length=100),
-        FieldSchema(name="chunk_index", dtype=DataType.INT64),
-        FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=65535),
-        FieldSchema(name="embedding", dtype=DataType.FLOAT_VECTOR, dim=EMBEDDING_DIM),
-    ]
-    schema = CollectionSchema(fields=fields, description="Global RAG vectors collection")
-    collection = Collection(name=col_name, schema=schema)
-
-    # Create index for fast search
-    index_params = {
-        "metric_type": "COSINE",
-        "index_type": "IVF_FLAT",
-        "params": {"nlist": 128},
-    }
-    collection.create_index(field_name="embedding", index_params=index_params)
-    collection.load()
-
-    logger.info(f"Created global Milvus collection '{col_name}'")
-    return collection
+STOP_WORDS = {
+    "what",
+    "is",
+    "the",
+    "in",
+    "a",
+    "an",
+    "of",
+    "and",
+    "to",
+    "for",
+    "with",
+    "on",
+    "at",
+    "by",
+    "from",
+    "about",
+    "as",
+    "into",
+    "like",
+    "through",
+    "after",
+    "over",
+    "between",
+    "out",
+    "against",
+    "during",
+    "without",
+    "before",
+    "under",
+    "around",
+    "among",
+}
 
 
-def add_document_chunks(
+def _cosine_similarity(left: list[float], right: list[float]) -> float:
+    """Calculate cosine similarity between two vectors."""
+    if not left or not right or len(left) != len(right):
+        return 0.0
+
+    dot_product = sum(a * b for a, b in zip(left, right))
+    left_norm = math.sqrt(sum(a * a for a in left))
+    right_norm = math.sqrt(sum(b * b for b in right))
+
+    if left_norm == 0 or right_norm == 0:
+        return 0.0
+
+    return dot_product / (left_norm * right_norm)
+
+
+def _extract_keywords(query: str) -> list[str]:
+    """Extract lightweight search keywords from a question."""
+    keywords: list[str] = []
+    for raw_word in query.split():
+        word = raw_word.strip("?,.!;'\"").lower()
+        if word and word not in STOP_WORDS and len(word) > 2:
+            keywords.append(word)
+    return keywords
+
+
+def _keyword_score(text: str, keywords: list[str]) -> int:
+    """Count lightweight keyword matches inside a text chunk."""
+    lowered = text.lower()
+    return sum(lowered.count(keyword) for keyword in keywords)
+
+
+async def add_document_chunks(
     user_id: str,
     document_id: str,
     chunks: list[str],
     embeddings: list[list[float]],
 ) -> None:
-    """Store document chunks and their embeddings in the user's Milvus collection."""
+    """Store document chunks and embeddings in the local vector table."""
     if not chunks or not embeddings:
+        logger.info(
+            "Skipping add_document_chunks because chunks or embeddings are empty | user_id=%s | document_id=%s",
+            user_id,
+            document_id,
+        )
         return
 
-    collection = _get_or_create_collection()
+    if len(chunks) != len(embeddings):
+        raise ValueError("Chunk count does not match embedding count.")
+    logger.info(
+        "Persisting document chunks | user_id=%s | document_id=%s | chunk_count=%s",
+        user_id,
+        document_id,
+        len(chunks),
+    )
 
-    ids = [f"{document_id}_chunk_{i}" for i in range(len(chunks))]
-    user_ids = [user_id] * len(chunks)
-    doc_ids = [document_id] * len(chunks)
-    chunk_indices = list(range(len(chunks)))
+    rows = [
+        DocumentChunk(
+            id=f"{document_id}_chunk_{index}",
+            user_id=user_id,
+            document_id=document_id,
+            chunk_index=index,
+            text=chunk,
+            embedding=embedding,
+        )
+        for index, (chunk, embedding) in enumerate(zip(chunks, embeddings))
+    ]
 
-    # Truncate texts to fit Milvus VARCHAR limit
-    safe_chunks = [text[:65000] for text in chunks]
+    async with AsyncSessionLocal() as session:
+        session.add_all(rows)
+        await session.commit()
 
-    data = [ids, user_ids, doc_ids, chunk_indices, safe_chunks, embeddings]
-    try:
-        collection.insert(data)
-        collection.flush()
-        logger.info(f"Added {len(chunks)} chunks for document {document_id}")
-    except Exception as e:
-        logger.error(f"Failed to insert chunks into Milvus: {e}")
-        raise
+    logger.info("Added %s chunks for document %s", len(rows), document_id)
 
 
-def query_similar_chunks(
+async def query_similar_chunks(
     user_id: str,
     query_embedding: list[float],
     top_k: int = 10,
 ) -> list[dict]:
-    """Query the most similar chunks from the global Milvus collection for a specific user."""
-    _ensure_connection()
-    col_name = "rag_documents"
+    """Query the most similar chunks for a specific user."""
+    logger.info(
+        "Vector search started | user_id=%s | top_k=%s | embedding_dim=%s",
+        user_id,
+        top_k,
+        len(query_embedding),
+    )
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DocumentChunk).where(DocumentChunk.user_id == user_id)
+        )
+        chunks = result.scalars().all()
+    logger.info("Vector search candidate pool | user_id=%s | chunk_count=%s", user_id, len(chunks))
 
-    if not utility.has_collection(col_name):
-        logger.warning(f"Global collection '{col_name}' does not exist.")
-        return []
+    scored_chunks: list[dict] = []
+    for chunk in chunks:
+        similarity = _cosine_similarity(query_embedding, chunk.embedding)
+        scored_chunks.append(
+            {
+                "id": chunk.id,
+                "text": chunk.text,
+                "document_id": chunk.document_id,
+                "doc_id": chunk.document_id,
+                "chunk_index": chunk.chunk_index,
+                "similarity": similarity,
+                "distance": 1 - similarity,
+            }
+        )
 
-    collection = Collection(col_name)
-    collection.load()
+    scored_chunks.sort(key=lambda item: item["distance"])
+    top_results = scored_chunks[:top_k]
+    logger.info(
+        "Vector search completed | user_id=%s | returned=%s | best_similarity=%.4f",
+        user_id,
+        len(top_results),
+        top_results[0]["similarity"] if top_results else 0.0,
+    )
+    return top_results
 
-    search_params = {"metric_type": "COSINE", "params": {"nprobe": 16}}
-    
-    # Metadata filtering: Only search chunks belonging to this user
-    expr = f"user_id == '{user_id}'"
 
-    results = collection.search(
-        data=[query_embedding],
-        anns_field="embedding",
-        param=search_params,
-        limit=top_k,
-        expr=expr,
-        output_fields=["text", "document_id", "id"],
+async def search_vector_ids(
+    user_id: str,
+    query_embedding: list[float],
+    top_k: int = 5,
+) -> list[str]:
+    """Return deduplicated document IDs from vector retrieval results."""
+    results = await query_similar_chunks(
+        user_id=user_id,
+        query_embedding=query_embedding,
+        top_k=top_k,
     )
 
-    output = []
-    for hits in results:
-        for hit in hits:
-            output.append({
-                "id": hit.entity.get("id"),
-                "text": hit.entity.get("text", ""),
-                "document_id": hit.entity.get("document_id", ""),
-                "distance": hit.distance,
-            })
+    seen = set()
+    doc_ids: list[str] = []
+    for chunk in results:
+        doc_id = chunk.get("document_id", "")
+        if doc_id and doc_id not in seen:
+            seen.add(doc_id)
+            doc_ids.append(doc_id)
 
-    return output
-
-
-def _sanitize_milvus_input(value: str) -> str:
-    """Sanitize input for use in Milvus expressions to prevent injection attacks."""
-    # Remove characters that could break Milvus expressions
-    dangerous_chars = ['"', "'", "\\", ";", "(", ")", "==", "||", "&&"]
-    sanitized = value
-    for char in dangerous_chars:
-        sanitized = sanitized.replace(char, "")
-    return sanitized.strip()
+    logger.info("[search_vector_ids] Retrieved doc_ids: %s", doc_ids)
+    return doc_ids
 
 
-def query_keyword_chunks(
+async def query_keyword_chunks(
     user_id: str,
     query: str,
     limit: int = 10,
 ) -> list[dict]:
-    """Perform a keyword search using Milvus LIKE operations."""
-    _ensure_connection()
-    col_name = "rag_documents"
+    """Perform a lightweight keyword search over locally stored chunks.
 
-    if not utility.has_collection(col_name):
-        return []
-
-    collection = Collection(col_name)
-    collection.load()
-
-    # Extremely basic stopword removal to find important keywords
-    stop_words = {"what", "is", "the", "in", "a", "an", "of", "and", "to", "for", "with", "on", "at", "by", "from", "about", "as", "into", "like", "through", "after", "over", "between", "out", "against", "during", "without", "before", "under", "around", "among"}
-    words = [w.strip("?,.!;'\"").lower() for w in query.split()]
-    keywords = [_sanitize_milvus_input(w) for w in words if w and w not in stop_words and len(w) > 2]
-    keywords = [kw for kw in keywords if kw]  # Remove empty strings after sanitization
-
+    Returns chunks with a normalized ``keyword_score`` in [0, 1] so that
+    downstream hybrid merge can weight keyword relevance meaningfully.
+    """
+    keywords = _extract_keywords(query)
     if not keywords:
+        logger.info("Keyword search skipped | user_id=%s | reason=no_keywords", user_id)
         return []
+    logger.info(
+        "Keyword search started | user_id=%s | limit=%s | keywords=%s",
+        user_id,
+        limit,
+        keywords,
+    )
 
-    # Sanitize user_id for expression safety
-    safe_user_id = _sanitize_milvus_input(user_id)
-
-    # Build LIKE expression with sanitized inputs
-    like_clauses = [f'text like "%{kw}%"' for kw in keywords]
-    joined_likes = " or ".join(like_clauses)
-    expr = f"user_id == '{safe_user_id}' and ({joined_likes})"
-
-    try:
-        results = collection.query(
-            expr=expr,
-            output_fields=["text", "document_id", "id"],
-            limit=limit
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(DocumentChunk).where(DocumentChunk.user_id == user_id)
         )
-        
-        output = []
-        for hit in results:
-            output.append({
-                "id": hit.get("id"),
-                "text": hit.get("text", ""),
-                "document_id": hit.get("document_id", ""),
-                "distance": 0.0, # Keyword matches don't have vector distance
-            })
-        return output
-    except Exception as e:
-        logger.error(f"Keyword search failed: {e}")
-        return []
+        chunks = result.scalars().all()
+
+    scored: list[tuple[int, dict]] = []
+    max_hits = 0
+    for chunk in chunks:
+        hits = _keyword_score(chunk.text, keywords)
+        if hits <= 0:
+            continue
+        max_hits = max(max_hits, hits)
+        scored.append((hits, {
+            "id": chunk.id,
+            "text": chunk.text,
+            "document_id": chunk.document_id,
+            "doc_id": chunk.document_id,
+            "chunk_index": chunk.chunk_index,
+            "distance": 0.0,
+        }))
+
+    # Normalize scores to [0, 1]
+    matches: list[dict] = []
+    for hits, entry in scored:
+        entry["keyword_score"] = hits / max_hits if max_hits > 0 else 0.0
+        matches.append(entry)
+
+    matches.sort(key=lambda item: item["keyword_score"], reverse=True)
+    top_matches = matches[:limit]
+    logger.info(
+        "Keyword search completed | user_id=%s | returned=%s | max_hits=%s",
+        user_id,
+        len(top_matches),
+        max_hits,
+    )
+    return top_matches
 
 
-def delete_document_chunks(user_id: str, document_id: str) -> None:
-    """Delete all chunks for a specific document from the global collection."""
-    _ensure_connection()
-    col_name = "rag_documents"
+async def delete_document_chunks(user_id: str, document_id: str) -> None:
+    """Delete all chunks for a specific document from the local vector table."""
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            delete(DocumentChunk).where(
+                DocumentChunk.user_id == user_id,
+                DocumentChunk.document_id == document_id,
+            )
+        )
+        await session.commit()
 
-    if not utility.has_collection(col_name):
-        return
-
-    collection = Collection(col_name)
-    collection.load()
-
-    # Delete by expression (matching both user_id and document_id for safety)
-    expr = f"user_id == '{user_id}' and document_id == '{document_id}'"
-    try:
-        collection.delete(expr)
-        collection.flush()
-        logger.info(f"Deleted chunks for document {document_id}")
-    except Exception as e:
-        logger.error(f"Failed to delete chunks from Milvus: {e}")
+    logger.info("Deleted chunks for document %s", document_id)

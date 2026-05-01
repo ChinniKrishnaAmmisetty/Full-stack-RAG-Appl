@@ -1,11 +1,25 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { registerUser, getMe } from '../api';
+import { FiEye, FiEyeOff, FiLock, FiMail, FiUser, FiUserPlus } from 'react-icons/fi';
+import { registerUser } from '../api';
+import AuthShell from '../components/AuthShell';
 import { useAuth } from '../context/AuthContext';
-import { FiMail, FiLock, FiUser, FiUserPlus, FiEye, FiEyeOff } from 'react-icons/fi';
-import AiBot from '../components/AiBot';
-import MatrixBackground from '../components/MatrixBackground';
 import { playWelcomeSound } from '../utils/welcomeSound';
+
+const REGISTER_HIGHLIGHTS = [
+  {
+    title: 'Private knowledge base',
+    description: 'Each account works with its own uploaded document collection.',
+  },
+  {
+    title: 'Session memory',
+    description: 'Keep separate conversation threads for different research tasks.',
+  },
+  {
+    title: 'Fast evidence review',
+    description: 'See which document chunks supported the answer.',
+  },
+];
 
 export default function RegisterPage() {
   const [email, setEmail] = useState('');
@@ -14,172 +28,134 @@ export default function RegisterPage() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
-  const [isPasswordFocused, setIsPasswordFocused] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [botExpression, setBotExpression] = useState('neutral');
   const { login } = useAuth();
   const navigate = useNavigate();
-  const cardRef = useRef(null);
 
-  useEffect(() => {
-    const handleBgMove = (e) => {
-      document.documentElement.style.setProperty('--mouse-x', `${e.clientX}px`);
-      document.documentElement.style.setProperty('--mouse-y', `${e.clientY}px`);
-    };
-    window.addEventListener('mousemove', handleBgMove);
-    return () => window.removeEventListener('mousemove', handleBgMove);
-  }, []);
-
-  const handleCardMove = (e) => {
-    if (!cardRef.current) return;
-    const rect = cardRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left - rect.width / 2;
-    const y = e.clientY - rect.top - rect.height / 2;
-    const rotateX = (y / (rect.height / 2)) * -8;
-    const rotateY = (x / (rect.width / 2)) * 8;
-    cardRef.current.style.transform = `perspective(1000px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) translateY(-5px)`;
-    cardRef.current.style.transition = 'none';
-  };
-
-  const handleCardLeave = () => {
-    if (cardRef.current) {
-      cardRef.current.style.transform = `perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(0)`;
-      cardRef.current.style.transition = 'transform 0.5s ease';
-    }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const handleSubmit = async (event) => {
+    event.preventDefault();
     setError('');
 
     if (password !== confirmPassword) {
-      setError('Passwords do not match');
-      setBotExpression('sad');
+      setError('Passwords do not match.');
       return;
     }
+
     if (password.length < 6) {
-      setError('Password must be at least 6 characters');
-      setBotExpression('sad');
+      setError('Password must be at least 6 characters.');
       return;
     }
 
     setLoading(true);
-    setBotExpression('neutral');
+
     try {
-      const res = await registerUser({ email, username, password });
-      const token = res.data.access_token;
-      localStorage.setItem('token', token);
-      const userRes = await getMe();
-      login(token, userRes.data);
-      
-      setBotExpression('happy');
+      const response = await registerUser({ email, username, password });
+      const token = response.data.access_token;
+      await login(token);
       playWelcomeSound();
-      setTimeout(() => navigate('/chat'), 1500);
+
+      setTimeout(() => navigate('/chat'), 500);
     } catch (err) {
       setError(err.response?.data?.detail || 'Registration failed. Please try again.');
-      setBotExpression('sad');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="auth-page" id="register-page" style={{ position: 'relative', overflow: 'hidden' }}>
-      <MatrixBackground isError={!!error} />
-      <div className="auth-card" ref={cardRef} onMouseMove={handleCardMove} onMouseLeave={handleCardLeave}>
-        <div className="auth-header">
-          <div className="bot-mascot-container" style={{ marginTop: '-40px', marginBottom: '10px' }}>
-            <AiBot size={75} expression={isPasswordFocused ? 'back' : botExpression} isError={!!error} />
-          </div>
-          <h1>Join <span className="brand-gradient">ACK AI</span></h1>
-          <p>Create an account to start chatting with your documents</p>
-        </div>
-        {error && <div className="auth-error">{error}</div>}
-        <form onSubmit={handleSubmit} className="auth-form">
-          <div className="input-group">
-            <FiUser className="input-icon" />
-            <input
-              id="register-username"
-              type="text"
-              placeholder="Username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              required
-              minLength={3}
-              autoComplete="username"
-            />
-          </div>
-          <div className="input-group">
-            <FiMail className="input-icon" />
-            <input
-              id="register-email"
-              type="email"
-              placeholder="Email address"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              required
-              autoComplete="email"
-            />
-          </div>
-          <div className="input-group">
-            <FiLock className="input-icon" />
-            <input
-              id="register-password"
-              type={showPassword ? "text" : "password"}
-              placeholder="Password (min 6 characters)"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              onFocus={() => setIsPasswordFocused(true)}
-              onBlur={() => setIsPasswordFocused(false)}
-              required
-              minLength={6}
-              autoComplete="new-password"
-              style={{ paddingRight: '40px' }}
-            />
-            <button
-              type="button"
-              className="password-toggle-icon"
-              onClick={() => setShowPassword(!showPassword)}
-              tabIndex="-1"
-              title={showPassword ? "Hide password" : "Show password"}
-            >
-              {showPassword ? <FiEyeOff /> : <FiEye />}
-            </button>
-          </div>
-          <div className="input-group">
-            <FiLock className="input-icon" />
-            <input
-              id="register-confirm-password"
-              type={showConfirmPassword ? "text" : "password"}
-              placeholder="Confirm password"
-              value={confirmPassword}
-              onChange={(e) => setConfirmPassword(e.target.value)}
-              onFocus={() => setIsPasswordFocused(true)}
-              onBlur={() => setIsPasswordFocused(false)}
-              required
-              autoComplete="new-password"
-              style={{ paddingRight: '40px' }}
-            />
-            <button
-              type="button"
-              className="password-toggle-icon"
-              onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-              tabIndex="-1"
-              title={showConfirmPassword ? "Hide password" : "Show password"}
-            >
-              {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
-            </button>
-          </div>
-          <button id="register-submit" type="submit" className="btn-primary" disabled={loading}>
-            {loading ? <span className="btn-spinner"></span> : <><FiUserPlus /> Create Account</>}
-          </button>
-        </form>
-
+    <AuthShell
+      eyebrow="Workspace Setup"
+      showcaseTitle="Create a focused AI workspace for your team documents."
+      showcaseText="Upload reports, policies, spreadsheets, and notes, then ask questions in a cleaner, professional environment."
+      highlights={REGISTER_HIGHLIGHTS}
+      formTitle="Create your account"
+      formText="Set up your login details to start building your document workspace."
+      footer={
         <p className="auth-footer">
           Already have an account? <Link to="/login">Sign in</Link>
         </p>
-      </div>
-    </div>
+      }
+    >
+      {error && <div className="auth-notice error">{error}</div>}
+
+      <form onSubmit={handleSubmit} className="auth-form">
+        <div className="input-group">
+          <FiUser className="input-icon" />
+          <input
+            id="register-username"
+            type="text"
+            placeholder="Username"
+            value={username}
+            onChange={(event) => setUsername(event.target.value)}
+            required
+            minLength={3}
+            autoComplete="username"
+          />
+        </div>
+
+        <div className="input-group">
+          <FiMail className="input-icon" />
+          <input
+            id="register-email"
+            type="email"
+            placeholder="Email address"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            required
+            autoComplete="email"
+          />
+        </div>
+
+        <div className="input-group">
+          <FiLock className="input-icon" />
+          <input
+            id="register-password"
+            type={showPassword ? 'text' : 'password'}
+            placeholder="Password (min 6 characters)"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+            required
+            minLength={6}
+            autoComplete="new-password"
+          />
+          <button
+            type="button"
+            className="password-toggle-icon"
+            onClick={() => setShowPassword((current) => !current)}
+            tabIndex="-1"
+            title={showPassword ? 'Hide password' : 'Show password'}
+          >
+            {showPassword ? <FiEyeOff /> : <FiEye />}
+          </button>
+        </div>
+
+        <div className="input-group">
+          <FiLock className="input-icon" />
+          <input
+            id="register-confirm-password"
+            type={showConfirmPassword ? 'text' : 'password'}
+            placeholder="Confirm password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            required
+            autoComplete="new-password"
+          />
+          <button
+            type="button"
+            className="password-toggle-icon"
+            onClick={() => setShowConfirmPassword((current) => !current)}
+            tabIndex="-1"
+            title={showConfirmPassword ? 'Hide password' : 'Show password'}
+          >
+            {showConfirmPassword ? <FiEyeOff /> : <FiEye />}
+          </button>
+        </div>
+
+        <button id="register-submit" type="submit" className="btn-primary" disabled={loading}>
+          {loading ? <span className="btn-spinner"></span> : <><FiUserPlus /> Create account</>}
+        </button>
+      </form>
+    </AuthShell>
   );
 }

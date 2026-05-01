@@ -1,88 +1,96 @@
-"""Embedding generation service using Gemini's text-embedding API."""
+"""Embedding generation service backed by Ollama."""
 
-import logging
 import asyncio
-import google.generativeai as genai
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+import logging
+
 from app.config import get_settings
+from app.services.ollama_service import (
+    OllamaServiceError,
+    get_sync_client,
+    normalize_ollama_exception,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
-def _ensure_configured():
-    """Ensure Gemini API is configured."""
-    genai.configure(api_key=settings.GEMINI_API_KEY)
-
-
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type(Exception),
-    before_sleep=lambda retry_state: logger.warning(
-        f"Embedding API call failed, retrying (attempt {retry_state.attempt_number}/3)..."
-    ),
-)
-def generate_embeddings(texts: list[str]) -> list[list[float]]:
-    """Generate embeddings for a list of text strings using Gemini.
-
-    Args:
-        texts: List of text strings to embed.
-
-    Returns:
-        List of embedding vectors (each a list of floats).
-    """
-    _ensure_configured()
-    logger.info(f"Generating embeddings for {len(texts)} texts via Gemini ({settings.GEMINI_EMBEDDING_MODEL})")
-
-    embeddings = []
-    # Process in batches of 100 (Gemini API limit)
-    batch_size = 100
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i:i + batch_size]
-        result = genai.embed_content(
-            model=f"models/{settings.GEMINI_EMBEDDING_MODEL}",
-            content=batch,
-            task_type="retrieval_document",
+def _embed(input_data: str | list[str]):
+    """Call the configured Ollama embedding model."""
+    try:
+        return get_sync_client().embed(
+            model=settings.OLLAMA_EMBEDDING_MODEL,
+            input=input_data,
         )
-        embeddings.extend(result["embedding"])
+    except Exception as exc:
+        raise normalize_ollama_exception(
+            exc,
+            model_name=settings.OLLAMA_EMBEDDING_MODEL,
+            task_type="embedding",
+        ) from exc
 
-    logger.info(f"Generated {len(embeddings)} embeddings")
+
+def generate_embeddings(texts: list[str]) -> list[list[float]]:
+    """Generate embeddings for a batch of text strings."""
+    if not texts:
+        return []
+
+    logger.info(
+        "Generating embeddings for %s texts via Ollama (%s)",
+        len(texts),
+        settings.OLLAMA_EMBEDDING_MODEL,
+    )
+    batch_size = max(1, settings.OLLAMA_EMBED_BATCH_SIZE)
+    embeddings: list[list[float]] = []
+
+    for start_index in range(0, len(texts), batch_size):
+        batch = texts[start_index:start_index + batch_size]
+        batch_number = (start_index // batch_size) + 1
+        total_batches = (len(texts) + batch_size - 1) // batch_size
+        logger.info(
+            "Embedding batch %s/%s with %s chunks",
+            batch_number,
+            total_batches,
+            len(batch),
+        )
+        response = _embed(batch)
+        embeddings.extend(response["embeddings"])
+
+    logger.info("Generated %s embeddings", len(embeddings))
     return embeddings
 
 
 async def generate_embeddings_async(texts: list[str]) -> list[list[float]]:
-    """Async wrapper — runs embedding generation in a thread pool to avoid blocking the event loop."""
+    """Async wrapper that runs embedding generation in a worker thread."""
     return await asyncio.to_thread(generate_embeddings, texts)
 
 
-@retry(
-    stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=1, max=10),
-    retry=retry_if_exception_type(Exception),
-    before_sleep=lambda retry_state: logger.warning(
-        f"Query embedding API call failed, retrying (attempt {retry_state.attempt_number}/3)..."
-    ),
-)
 def generate_query_embedding(query: str) -> list[float]:
-    """Generate an embedding for a single search query.
-
-    Args:
-        query: The search query text.
-
-    Returns:
-        The embedding vector as a list of floats.
-    """
-    _ensure_configured()
-    result = genai.embed_content(
-        model=f"models/{settings.GEMINI_EMBEDDING_MODEL}",
-        content=query,
-        task_type="retrieval_query",
-    )
-    return result["embedding"]
+    """Generate an embedding for a single search query."""
+    response = _embed(query)
+    embeddings = response["embeddings"]
+    return embeddings[0] if embeddings else []
 
 
 async def generate_query_embedding_async(query: str) -> list[float]:
     """Async wrapper for query embedding generation."""
     return await asyncio.to_thread(generate_query_embedding, query)
 
+
+def diagnose_embedding_model() -> dict:
+    """Run a lightweight embedding capability check against Ollama."""
+    model_name = settings.OLLAMA_EMBEDDING_MODEL
+
+    try:
+        embedding = generate_query_embedding("health check")
+        return {
+            "status": "ok",
+            "model": model_name,
+            "detail": "Embedding model is reachable.",
+            "dimension": len(embedding),
+        }
+    except OllamaServiceError as exc:
+        return {
+            "status": exc.status,
+            "model": model_name,
+            "detail": exc.user_message,
+        }
